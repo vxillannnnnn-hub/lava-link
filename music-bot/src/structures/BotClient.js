@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, Partials, Options } = require("discord.js");
+const { Client, GatewayIntentBits, Collection, Partials, Options, Events } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
@@ -81,7 +81,7 @@ class BotClient extends Client {
     this.on("raw", (data) => this.lavalink.sendRawData(data));
 
     // Register with multiBotCoordinator once logged in
-    this.once("ready", () => {
+    this.once(Events.ClientReady || "clientReady", () => {
       try {
         const multiBotCoordinator = require("../utils/multiBotCoordinator");
         multiBotCoordinator.registerClient(this);

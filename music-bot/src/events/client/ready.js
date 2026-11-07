@@ -1,10 +1,11 @@
+const { Events } = require("discord.js");
 const logger = require("../../utils/logger");
 const stateManager = require("../../utils/stateManager");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 const presenceManager = require("../../utils/presenceManager");
 
 module.exports = {
-  name: "ready",
+  name: Events.ClientReady || "clientReady",
   once: true,
   async execute(client) {
     const shardInfo = client.shard
