@@ -43,7 +43,7 @@ module.exports = {
     // -------------------------------------------------------------------------
     if (interaction.isStringSelectMenu()) {
       try {
-        if (interaction.customId === "select_filter") {
+        if (interaction.customId === "select_filter" || interaction.customId === "ctrl_select_filter") {
           await handleFilterSelect(interaction, client);
           return;
         }
@@ -85,8 +85,9 @@ module.exports = {
         return interaction.reply(errorText(`Command \`/${interaction.commandName}\` does not exist.`));
       }
 
-      // Voice channel checks for music commands
-      if (command.category === "music" && !["nowplaying", "queue", "lyrics", "grab"].includes(command.data.name)) {
+      // Voice channel checks for music playback/control commands (excludes non-voice management/informational commands)
+      const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist"];
+      if (command.category === "music" && !exemptMusicCommands.includes(command.data.name)) {
         if (!interaction.member?.voice?.channelId) {
           return interaction.reply(
             warnText("You must be connected to a voice channel to use music commands.")

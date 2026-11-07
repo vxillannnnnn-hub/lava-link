@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const { actionText, errorText, warnText } = require("../../utils/responses");
 const emojis = require("../../utils/emojis");
 const config = require("../../config");
@@ -10,9 +10,18 @@ module.exports = {
     .setDescription("Summon the bot to your current voice channel"),
 
   async execute(interaction, client) {
-    const voiceChannel = interaction.member.voice.channel;
+    const voiceChannel = interaction.member.voice?.channel;
     if (!voiceChannel) {
       return interaction.reply(errorText("You must join a voice channel first!"));
+    }
+
+    const me = interaction.guild.members.me;
+    const permissions = voiceChannel.permissionsFor(me);
+    if (!permissions?.has(PermissionFlagsBits.Connect)) {
+      return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
+    }
+    if (!permissions?.has(PermissionFlagsBits.Speak)) {
+      return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
     }
 
     let player = client.lavalink.getPlayer(interaction.guildId);

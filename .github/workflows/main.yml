@@ -142,6 +142,7 @@ jobs:
             -Dsun.net.inetaddr.negative.ttl=5 \
             -Dhttp.keepAlive=true \
             -Dhttp.maxConnections=256 \
+            -Dio.netty.transport.noNative=false \
             -Dio.netty.allocator.type=pooled \
             -Dio.netty.allocator.numDirectArenas=4 \
             -Dio.netty.noPreferDirect=false \

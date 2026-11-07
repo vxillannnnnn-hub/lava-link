@@ -31,26 +31,17 @@ function buildPlaceholderPayload() {
     "-# Supports Spotify, YouTube, SoundCloud, JioSaavn & Direct Streams"
   );
 
-  const row1 = new ActionRowBuilder().addComponents(
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("btn_prev").setEmoji(emojis.previous).setStyle(ButtonStyle.Secondary).setDisabled(true),
     new ButtonBuilder().setCustomId("btn_pause_resume").setEmoji(emojis.play).setStyle(ButtonStyle.Secondary).setDisabled(true),
     new ButtonBuilder().setCustomId("btn_skip").setEmoji(emojis.skip).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_save").setEmoji(emojis.save).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_open_player").setEmoji(emojis.openPlayer).setLabel("Open player").setStyle(ButtonStyle.Primary).setDisabled(true)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("btn_loop").setEmoji(emojis.loop).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_shuffle").setEmoji(emojis.shuffle).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_autoplay").setEmoji(emojis.autoplay).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_queue").setEmoji(emojis.queue).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId("btn_stop").setEmoji(emojis.stop).setStyle(ButtonStyle.Secondary).setDisabled(true)
+    new ButtonBuilder().setCustomId("btn_open_player").setEmoji(emojis.openPlayer).setLabel("Controls").setStyle(ButtonStyle.Secondary).setDisabled(true)
   );
 
   if (config.player.useComponentsV2) {
     return {
       flags: 32768,
-      components: [container, row1, row2],
+      components: [container, row],
       allowed_mentions: { parse: [], users: [] },
       allowedMentions: { parse: [], users: [] },
     };
@@ -66,7 +57,7 @@ function buildPlaceholderPayload() {
 
   return {
     embeds: [embed],
-    components: [row1, row2],
+    components: [row],
     allowedMentions: { parse: [], users: [] },
   };
 }
@@ -122,6 +113,15 @@ async function handleSongRequestMessage(message, client) {
   if (!voiceChannel) {
     const reply = await message.channel.send({
       content: `${emojis.warn} ${message.author}, you must be connected to a voice channel to request songs!`,
+    }).catch(() => null);
+    if (reply) setTimeout(() => reply.delete().catch(() => {}), 6000);
+    return true;
+  }
+
+  const voicePerms = voiceChannel.permissionsFor(message.guild.members.me);
+  if (!voicePerms?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
+    const reply = await message.channel.send({
+      content: `${emojis.cross} ${message.author}, I lack permission to **Connect** or **Speak** in <#${voiceChannel.id}>!`,
     }).catch(() => null);
     if (reply) setTimeout(() => reply.delete().catch(() => {}), 6000);
     return true;

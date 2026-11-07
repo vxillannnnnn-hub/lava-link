@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { actionText, errorText } = require("../../utils/responses");
 const { parseDuration, formatDuration } = require("../../utils/formatters");
+const emojis = require("../../utils/emojis");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -48,7 +49,7 @@ module.exports = {
 
     return interaction.reply(
       actionText(
-        "⏱️",
+        emojis.disc,
         `Seeked playback to **${formatDuration(targetMs)}**.`,
         `Total duration: \`${formatDuration(currentTrack.info.duration)}\``
       )

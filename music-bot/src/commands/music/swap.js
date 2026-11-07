@@ -23,8 +23,8 @@ module.exports = {
     const second = interaction.options.getInteger("second");
     const total = player.queue.tracks.length;
 
-    if (first > total || second > total) {
-      return interaction.reply(errorText(`Track positions must be between 1 and ${total}.`));
+    if (!first || !second || first < 1 || second < 1 || first > total || second > total) {
+      return interaction.reply(errorText(`Track positions must be valid numbers between 1 and ${total}.`));
     }
 
     if (first === second) {

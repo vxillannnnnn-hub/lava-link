@@ -61,10 +61,10 @@ class MultiBotCoordinator {
       }
     }
 
-    // Commands that don't need a voice channel (e.g. help, ping, stats, prefix)
-    const nonVoiceCommands = ["help", "ping", "stats", "prefix", "dj"];
+    // Commands that don't strictly require a voice channel (e.g. help, ping, stats, prefix, setup-channel, dj, playlist, queue)
+    const nonVoiceCommands = ["help", "ping", "stats", "prefix", "dj", "setup-channel", "playlist", "nowplaying", "queue", "lyrics", "grab"];
     if (nonVoiceCommands.includes(parsed.commandName)) {
-      // Primary bot handles non-voice informational commands
+      // Primary bot handles non-voice informational and management commands
       return botIndex === 0;
     }
 

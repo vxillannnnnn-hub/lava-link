@@ -10,6 +10,7 @@ const emojis = require("./emojis");
  * @returns {string}
  */
 function formatDuration(ms) {
+  if (ms === 0) return "00:00";
   if (!ms || isNaN(ms) || ms < 0 || ms === Infinity) return "LIVE";
   
   const totalSeconds = Math.floor(ms / 1000);
@@ -31,8 +32,8 @@ function formatDuration(ms) {
  * @returns {number|null}
  */
 function parseDuration(str) {
-  if (!str) return null;
-  str = str.trim().toLowerCase();
+  if (!str && str !== 0) return null;
+  str = String(str).trim().toLowerCase();
 
   // If pure digits, treat as seconds
   if (/^\d+$/.test(str)) {
@@ -42,7 +43,7 @@ function parseDuration(str) {
   // If formatted like mm:ss or hh:mm:ss
   if (str.includes(":")) {
     const parts = str.split(":").map((p) => parseInt(p, 10));
-    if (parts.some((p) => isNaN(p))) return null;
+    if (parts.some((p) => isNaN(p) || p < 0)) return null;
     if (parts.length === 2) {
       return (parts[0] * 60 + parts[1]) * 1000;
     }
@@ -53,15 +54,16 @@ function parseDuration(str) {
 
   // If formatted with units: 1h, 2m, 30s
   let totalMs = 0;
+  let hasUnit = false;
   const matchHours = str.match(/(\d+)\s*h/);
   const matchMinutes = str.match(/(\d+)\s*m/);
   const matchSeconds = str.match(/(\d+)\s*s/);
 
-  if (matchHours) totalMs += parseInt(matchHours[1], 10) * 3600 * 1000;
-  if (matchMinutes) totalMs += parseInt(matchMinutes[1], 10) * 60 * 1000;
-  if (matchSeconds) totalMs += parseInt(matchSeconds[1], 10) * 1000;
+  if (matchHours) { totalMs += parseInt(matchHours[1], 10) * 3600 * 1000; hasUnit = true; }
+  if (matchMinutes) { totalMs += parseInt(matchMinutes[1], 10) * 60 * 1000; hasUnit = true; }
+  if (matchSeconds) { totalMs += parseInt(matchSeconds[1], 10) * 1000; hasUnit = true; }
 
-  return totalMs > 0 ? totalMs : null;
+  return hasUnit ? totalMs : null;
 }
 
 /**

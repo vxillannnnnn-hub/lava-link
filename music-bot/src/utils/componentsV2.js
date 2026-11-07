@@ -58,7 +58,7 @@ class ComponentsV2Container {
 function buildComponentsV2Payload(player, actionRows = []) {
   const track = player.queue.current;
   if (!track) {
-    const fallbackContainer = new ComponentsV2Container(config.colors.primary);
+    const fallbackContainer = new ComponentsV2Container(0x2b2d31);
     fallbackContainer.addSection(`### ${emojis.music} Ready for Music\nUse \`/play\` to start streaming audio.`);
     return {
       flags: 32768,

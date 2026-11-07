@@ -8,6 +8,7 @@ const { infoEmbed, warnEmbed, errorEmbed } = require("../utils/embed");
 const { truncate } = require("../utils/formatters");
 const emojis = require("../utils/emojis");
 const voiceStatusManager = require("../utils/voiceStatusManager");
+const presenceManager = require("../utils/presenceManager");
 const audioOptimizer = require("../utils/audioOptimizer");
 const stateManager = require("../utils/stateManager");
 
@@ -131,6 +132,9 @@ function initLavalink(client) {
     // Update real-time Voice Channel Status without emojis (Rotating Templates)
     voiceStatusManager.onTrackStart(client, player, track);
 
+    // Update real-time bot Streaming Presence (Purple Stream Badge with Song Title)
+    presenceManager.onTrackStart(client, player, track);
+
     if (!channel) return;
 
     try {
@@ -143,6 +147,7 @@ function initLavalink(client) {
   manager.on("trackEnd", async (player, track) => {
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
     voiceStatusManager.onTrackEnd(client, player);
+    presenceManager.onTrackEnd(client);
   });
 
   manager.on("trackStuck", async (player, track, payload) => {
@@ -194,6 +199,7 @@ function initLavalink(client) {
 
     // Clear Voice Channel Status when queue finishes
     voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
+    presenceManager.onTrackEnd(client);
 
     // Clean up previous dashboard
     const prevMsgId = player.get("nowPlayingMsgId");
@@ -212,7 +218,7 @@ function initLavalink(client) {
         const channel = client.channels.cache.get(player.textChannelId);
         if (channel) {
           channel.send({
-            content: "⏱️ Queue finished. Staying in voice channel (24/7 Mode Active).",
+            content: `${emojis.time} Queue finished. Staying in voice channel (24/7 Mode Active).`,
             allowedMentions: { parse: [], users: [] },
           }).then((m) => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
         }
@@ -236,6 +242,7 @@ function initLavalink(client) {
     logger.debug(`Player destroyed for guild ${player.guildId}`);
     updateRequestChannelDashboard(client, player.guildId, null);
     voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
+    presenceManager.onTrackEnd(client);
     const prevMsgId = player.get("nowPlayingMsgId");
     if (prevMsgId && player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);

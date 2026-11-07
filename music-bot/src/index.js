@@ -1,6 +1,7 @@
 require("dotenv").config();
 const BotClient = require("./structures/BotClient");
 const logger = require("./utils/logger");
+const stateManager = require("./utils/stateManager");
 
 const BANNER = `
 \x1b[35m
@@ -31,11 +32,13 @@ process.on("uncaughtException", (error) => {
 const cleanup = async (signal) => {
   logger.info(`Received ${signal}. Shutting down cleanly...`);
   try {
+    // Preserve queue and playback state to disk before destroying players
+    stateManager.saveState(client);
     for (const [, player] of client.lavalink.players) {
       await player.destroy(`Process ${signal} shutdown`);
     }
     client.destroy();
-    logger.success("All players safely closed. Goodbye!");
+    logger.success("All players safely closed and session state saved. Goodbye!");
     process.exit(0);
   } catch (err) {
     logger.error("Error during shutdown cleanup:", err);

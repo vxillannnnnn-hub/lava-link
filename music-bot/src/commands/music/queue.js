@@ -112,24 +112,24 @@ module.exports = {
       return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("queue_first")
-          .setEmoji("⏮️")
+          .setEmoji(emojis.previous)
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(page === 1),
         new ButtonBuilder()
           .setCustomId("queue_prev")
-          .setEmoji("◀️")
+          .setEmoji(emojis.previous)
           .setLabel("Previous")
-          .setStyle(ButtonStyle.Primary)
+          .setStyle(ButtonStyle.Secondary)
           .setDisabled(page === 1),
         new ButtonBuilder()
           .setCustomId("queue_next")
-          .setEmoji("▶️")
+          .setEmoji(emojis.skip)
           .setLabel("Next")
-          .setStyle(ButtonStyle.Primary)
+          .setStyle(ButtonStyle.Secondary)
           .setDisabled(page === totalPages),
         new ButtonBuilder()
           .setCustomId("queue_last")
-          .setEmoji("⏭️")
+          .setEmoji(emojis.skip)
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(page === totalPages)
       );

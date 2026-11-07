@@ -24,14 +24,31 @@ module.exports = {
       return interaction.reply(errorText("No active audio player found in this server."));
     }
 
-    const mode = interaction.options.getString("mode");
-    player.setRepeatMode(mode);
+    let mode = interaction.options.getString("mode");
+    if (mode) {
+      mode = mode.toLowerCase();
+      if (mode === "song") mode = "track";
+    } else {
+      // Toggle mode if none provided
+      const current = player.repeatMode || "off";
+      if (current === "off") mode = "track";
+      else if (current === "track") mode = "queue";
+      else mode = "off";
+    }
 
     const descriptions = {
       off: { title: "Loop mode turned **OFF**.", sub: "Tracks will play once through sequentially" },
       track: { title: "Loop mode set to **TRACK**.", sub: "Current song will repeat continuously" },
       queue: { title: "Loop mode set to **QUEUE**.", sub: "Entire queue will replay upon reaching the end" },
     };
+
+    if (!descriptions[mode]) {
+      return interaction.reply(
+        errorText("Invalid loop mode! Available options: `off`, `track`, `queue`.")
+      );
+    }
+
+    player.setRepeatMode(mode);
 
     const targetEmoji = mode === "track" ? emojis.loopOne : emojis.loop;
     const info = descriptions[mode];

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ButtonStyle } = require("discord.js");
+const { SlashCommandBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
 const { actionWithButton, errorText } = require("../../utils/responses");
 const { formatDuration, truncate } = require("../../utils/formatters");
 const { detectSource, getPlatformTheme, cleanTrackTitle } = require("../../utils/sourceManager");
@@ -24,10 +24,10 @@ module.exports = {
         .setName("source")
         .setDescription("Force search platform (defaults to auto / Spotify)")
         .addChoices(
-          { name: "🟢 Spotify (Full Track Audio)", value: "spsearch" },
-          { name: "🔴 YouTube (Videos & Music)", value: "ytsearch" },
-          { name: "🟠 SoundCloud (Independent & Mixes)", value: "scsearch" },
-          { name: "🔷 JioSaavn (Bollywood & Indian)", value: "jssearch" }
+          { name: "Spotify (Full Track Audio)", value: "spsearch" },
+          { name: "YouTube (Videos & Music)", value: "ytsearch" },
+          { name: "SoundCloud (Independent & Mixes)", value: "scsearch" },
+          { name: "JioSaavn (Bollywood & Indian)", value: "jssearch" }
         )
     ),
 
@@ -42,10 +42,19 @@ module.exports = {
     const query = interaction.options.getString("query");
     const forcedSource = interaction.options.getString("source");
     const member = interaction.member;
-    const voiceChannel = member.voice.channel;
+    const voiceChannel = member.voice?.channel;
 
     if (!voiceChannel) {
       return interaction.reply(errorText("You need to be in a voice channel to play music!"));
+    }
+
+    const me = interaction.guild.members.me;
+    const permissions = voiceChannel.permissionsFor(me);
+    if (!permissions?.has(PermissionFlagsBits.Connect)) {
+      return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
+    }
+    if (!permissions?.has(PermissionFlagsBits.Speak)) {
+      return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
     }
 
     await interaction.deferReply();

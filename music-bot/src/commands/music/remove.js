@@ -23,8 +23,8 @@ module.exports = {
     }
 
     const pos = interaction.options.getInteger("position");
-    if (pos > player.queue.tracks.length) {
-      return interaction.reply(errorText(`Invalid position! Queue has ${player.queue.tracks.length} tracks.`));
+    if (!pos || pos < 1 || pos > player.queue.tracks.length) {
+      return interaction.reply(errorText(`Invalid position! Must be between 1 and ${player.queue.tracks.length}.`));
     }
 
     const removed = player.queue.tracks.splice(pos - 1, 1)[0];

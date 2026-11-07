@@ -27,9 +27,9 @@ module.exports = {
     const currentTitle = truncate(cleanTrackTitle(player.queue.current.info.title), 40);
     const jumpTo = interaction.options.getInteger("to");
 
-    if (jumpTo) {
-      if (jumpTo > player.queue.tracks.length) {
-        return interaction.reply(errorText(`Queue only contains ${player.queue.tracks.length} track(s). Cannot jump to #${jumpTo}.`));
+    if (jumpTo !== null && jumpTo !== undefined) {
+      if (jumpTo < 1 || jumpTo > player.queue.tracks.length) {
+        return interaction.reply(errorText(`Invalid track number! Must be between 1 and ${player.queue.tracks.length}.`));
       }
 
       player.queue.tracks.splice(0, jumpTo - 1);

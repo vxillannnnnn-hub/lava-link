@@ -202,7 +202,9 @@ class StateManager {
       logger.info(`[StateManager] Successfully restored ${restoredCount}/${data.sessions.length} voice session(s)!`);
 
       // Clean up snapshot once restored to prevent re-triggering
-      fs.unlinkSync(STATE_FILE);
+      try {
+        if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE);
+      } catch (_) {}
     } catch (err) {
       logger.error("[StateManager] Error during state restoration:", err.message);
     } finally {

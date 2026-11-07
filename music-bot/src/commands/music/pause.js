@@ -29,7 +29,7 @@ module.exports = {
         emojis.pause,
         "Audio stream paused.",
         "Click below or use `/resume` to unpause",
-        { customId: "cmd_resume", label: "Resume", emoji: emojis.play, style: ButtonStyle.Primary }
+        { customId: "cmd_resume", label: "Resume", emoji: emojis.play, style: ButtonStyle.Secondary }
       )
     );
   },

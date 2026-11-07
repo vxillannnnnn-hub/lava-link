@@ -35,8 +35,9 @@ module.exports = {
     const command = client.commands.get(parsed.commandName);
     if (!command) return;
 
-    // 6. Enforce voice channel safety for music commands
-    if (command.category === "music" && !["nowplaying", "queue", "lyrics", "grab"].includes(command.data.name)) {
+    // 6. Enforce voice channel safety for music commands (excludes non-voice management/informational commands)
+    const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist"];
+    if (command.category === "music" && !exemptMusicCommands.includes(command.data.name)) {
       if (!message.member?.voice?.channelId) {
         return message.reply(
           warnText("You must be connected to a voice channel to use music commands.")

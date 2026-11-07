@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionFlagsBits } = require("discord.js");
 const db = require("../../database/db");
 const { errorText, successText, actionWithButton, actionWithButtons } = require("../../utils/responses");
 const { truncate, formatDuration } = require("../../utils/formatters");
@@ -146,6 +146,15 @@ module.exports = {
         return interaction.reply(errorText("You must be connected to a voice channel to stream playlists!"));
       }
 
+      const me = interaction.guild.members.me;
+      const perms = voiceChannel.permissionsFor(me);
+      if (!perms?.has(PermissionFlagsBits.Connect)) {
+        return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
+      }
+      if (!perms?.has(PermissionFlagsBits.Speak)) {
+        return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
+      }
+
       const pl = db.getPlaylist(userId, name);
       if (!pl) {
         return interaction.reply(
@@ -188,11 +197,14 @@ module.exports = {
           if (res?.tracks?.length > 0) {
             player.queue.add(res.tracks[0]);
             loadedCount++;
+            if (!player.playing && !player.paused && loadedCount === 1) {
+              await player.play();
+            }
           }
         } catch {}
       }
 
-      if (!player.playing && !player.paused) {
+      if (!player.playing && !player.paused && player.queue.tracks.length > 0) {
         await player.play();
       }
 
@@ -216,6 +228,15 @@ module.exports = {
 
       if (!voiceChannel) {
         return interaction.reply(errorText("You must be connected to a voice channel to stream favorites!"));
+      }
+
+      const me = interaction.guild.members.me;
+      const perms = voiceChannel.permissionsFor(me);
+      if (!perms?.has(PermissionFlagsBits.Connect)) {
+        return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
+      }
+      if (!perms?.has(PermissionFlagsBits.Speak)) {
+        return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
       }
 
       const favorites = db.getFavorites(userId);
@@ -253,11 +274,14 @@ module.exports = {
           if (res?.tracks?.length > 0) {
             player.queue.add(res.tracks[0]);
             loadedCount++;
+            if (!player.playing && !player.paused && loadedCount === 1) {
+              await player.play();
+            }
           }
         } catch {}
       }
 
-      if (!player.playing && !player.paused) {
+      if (!player.playing && !player.paused && player.queue.tracks.length > 0) {
         await player.play();
       }
 

@@ -21,6 +21,7 @@ class CommandContext {
     this.member = interaction?.member || message?.member || null;
     this.user = interaction?.user || message?.author || null;
     this.author = this.user;
+    this.createdTimestamp = interaction?.createdTimestamp || message?.createdTimestamp || Date.now();
 
     this.replied = false;
     this.deferred = false;
@@ -31,7 +32,7 @@ class CommandContext {
       this.options = interaction.options;
     } else {
       // Determine if the command uses subcommands (e.g. .playlist create or .dj set)
-      const hasSubcommand = ["playlist", "dj"].includes(commandName?.toLowerCase());
+      const hasSubcommand = ["playlist", "dj", "autoplay"].includes(commandName?.toLowerCase());
       const effectiveArgs = hasSubcommand ? this.args.slice(1) : this.args;
 
       this.options = {
@@ -128,13 +129,18 @@ class CommandContext {
   }
 
   /**
-   * Sanitize payload for standard Discord messages (strips ephemeral flags)
+   * Sanitize payload for standard Discord messages (strips ephemeral flags, preserves Components V2)
    */
   _sanitizeMessagePayload(payload) {
     const msgPayload = typeof payload === "string" ? { content: payload } : { ...payload };
-    // Normal text messages cannot be ephemeral: strip ephemeral properties
+    // Normal text messages cannot be ephemeral: strip ephemeral bit (64) while preserving Components V2 (32768)
     if ("ephemeral" in msgPayload) delete msgPayload.ephemeral;
-    if ("flags" in msgPayload) delete msgPayload.flags;
+    if (typeof msgPayload.flags === "number") {
+      msgPayload.flags = msgPayload.flags & ~64;
+      if (msgPayload.flags === 0) delete msgPayload.flags;
+    } else {
+      delete msgPayload.flags;
+    }
     msgPayload.allowedMentions = { repliedUser: false, parse: [] };
     return msgPayload;
   }

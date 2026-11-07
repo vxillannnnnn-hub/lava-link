@@ -9,35 +9,35 @@ const PLATFORM_THEMES = {
   spotify: {
     name: "Spotify",
     badge: emojis.getPlatformBadge("spotify"),
-    color: 0x1db954, // Official Spotify Green
+    color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "spsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/spotify_logo_icon_169824.png",
   },
   youtube: {
     name: "YouTube",
     badge: emojis.getPlatformBadge("youtube"),
-    color: 0xff0000, // Official YouTube Red
+    color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "ytsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/youtube_logo_icon_168737.png",
   },
   soundcloud: {
     name: "SoundCloud",
     badge: emojis.getPlatformBadge("soundcloud"),
-    color: 0xff5500, // Official SoundCloud Orange
+    color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "scsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/soundcloud_logo_icon_168864.png",
   },
   jiosaavn: {
     name: "JioSaavn",
     badge: emojis.getPlatformBadge("jiosaavn"),
-    color: 0x00d2b5, // JioSaavn Teal
+    color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "jssearch",
     icon: "https://upload.wikimedia.org/wikipedia/commons/e/ed/JioSaavn_Logo.svg",
   },
   stream: {
     name: "Web Stream",
     badge: emojis.getPlatformBadge("http"),
-    color: 0x5865f2, // Discord Blurple
+    color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "http",
     icon: "https://cdn-icons-png.flaticon.com/512/3845/3845868.png",
   },

@@ -55,18 +55,18 @@ module.exports = {
     ],
   },
 
-  // Cohesive Modern Color Palette (Eara Design System)
+  // Strict Monochrome Palette (100% Dark Grayscale)
   colors: {
     surface: 0x2b2d31,     // Discord Native Dark Surface (Containers & Embeds)
-    primary: 0x5865f2,     // Blurple Accent (Primary Actions & Buttons)
-    success: 0x2ec4b6,     // Mint Green (Successful Operations)
-    warning: 0xf59e0b,     // Warm Amber (Warnings & Standby)
-    error: 0xef4444,       // Clean Crimson (Errors & Disconnects)
+    primary: 0x2b2d31,     // Monochrome Dark
+    success: 0x2b2d31,     // Monochrome Dark
+    warning: 0x2b2d31,     // Monochrome Dark
+    error: 0x2b2d31,       // Monochrome Dark
     neutral: 0x1e1f22,     // Deep Canvas
-    spotify: 0x1db954,     // Spotify Brand Green
-    youtube: 0xff0000,     // YouTube Crimson
-    soundcloud: 0xff5500,  // SoundCloud Amber
-    jiosaavn: 0x00d2b5,    // JioSaavn Teal
+    spotify: 0x2b2d31,     // Monochrome
+    youtube: 0x2b2d31,     // Monochrome
+    soundcloud: 0x2b2d31,  // Monochrome
+    jiosaavn: 0x2b2d31,    // Monochrome
   },
 
   // Centralized Shared Emojis (No Duplication)

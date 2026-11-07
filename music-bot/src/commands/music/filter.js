@@ -13,17 +13,17 @@ module.exports = {
         .setDescription("Select audio filter preset to apply")
         .setRequired(true)
         .addChoices(
-          { name: "🔄 Reset / Clean Passthrough (0ms Opus Direct)", value: "reset" },
-          { name: "🎚️ Sound Normalizer / Dynamic Limiter (Auto-Level Loudness)", value: "normalizer" },
-          { name: "🎧 8D Spatial Audio (Orbital 360° Panning)", value: "8d" },
-          { name: "🔊 Bass Boost (Low)", value: "bass_low" },
-          { name: "🔊 Bass Boost (Medium)", value: "bass_med" },
-          { name: "💥 Bass Boost (High / Heavy)", value: "bass_high" },
-          { name: "⚡ Nightcore (Fast BPM + High Pitch)", value: "nightcore" },
-          { name: "🌊 Vaporwave (Slow Lo-Fi Pitch)", value: "vaporwave" },
-          { name: "🎤 Karaoke (Vocal Attenuation)", value: "karaoke" },
-          { name: "🎵 Pop Curve", value: "pop" },
-          { name: "🎸 Rock Curve", value: "rock" }
+          { name: "Reset / Clean Passthrough (0ms Opus Direct)", value: "reset" },
+          { name: "Sound Normalizer / Dynamic Limiter (Auto-Level Loudness)", value: "normalizer" },
+          { name: "8D Spatial Audio (Orbital 360° Panning)", value: "8d" },
+          { name: "Bass Boost (Low)", value: "bass_low" },
+          { name: "Bass Boost (Medium)", value: "bass_med" },
+          { name: "Bass Boost (High / Heavy)", value: "bass_high" },
+          { name: "Nightcore (Fast BPM + High Pitch)", value: "nightcore" },
+          { name: "Vaporwave (Slow Lo-Fi Pitch)", value: "vaporwave" },
+          { name: "Karaoke (Vocal Attenuation)", value: "karaoke" },
+          { name: "Pop Curve", value: "pop" },
+          { name: "Rock Curve", value: "rock" }
         )
     ),
 
@@ -34,6 +34,15 @@ module.exports = {
     }
 
     const preset = interaction.options.getString("preset");
+    if (!preset) {
+      return interaction.reply(
+        actionText(
+          emojis.equalizer,
+          "Available Audio Filter Presets:",
+          "`reset`, `normalizer`, `8d`, `bass_low`, `bass_med`, `bass_high`, `nightcore`, `vaporwave`, `karaoke`, `pop`, `rock`\n-# Example: `/filter preset:bass_med` or `.filter bass_med`"
+        )
+      );
+    }
 
     switch (preset) {
       case "reset":

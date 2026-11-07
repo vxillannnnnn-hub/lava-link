@@ -151,10 +151,10 @@ module.exports = {
         .setName("category")
         .setDescription("Jump directly to a specific category")
         .addChoices(
-          { name: "🎶 Playback", value: "playback" },
-          { name: "📑 Queue Management", value: "queue" },
-          { name: "🎛️ Audio Filters", value: "filters" },
-          { name: "⚙️ System & Voice", value: "system" }
+          { name: "Playback", value: "playback" },
+          { name: "Queue Management", value: "queue" },
+          { name: "Audio Filters", value: "filters" },
+          { name: "System & Voice", value: "system" }
         )
     ),
 

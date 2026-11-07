@@ -36,7 +36,7 @@ async function fetchGoogleSuggestions(query) {
     return suggestions.slice(0, 10).map((s) => {
       const clean = truncate(s, 95);
       return {
-        name: `🔍 ${clean}`,
+        name: clean,
         value: clean,
       };
     });
@@ -115,7 +115,12 @@ async function handleSearchAutocomplete(interaction, client) {
   // Clamp strictly to Discord's maximum allowed 25 choices (we use top 10 for clean UX)
   const finalChoices = choices.slice(0, 10);
 
-  // Store in cache
+  // Store in cache with LRU eviction (cap at 500 entries to prevent memory leaks)
+  if (autocompleteCache.size >= 500) {
+    const oldestKey = autocompleteCache.keys().next().value;
+    if (oldestKey) autocompleteCache.delete(oldestKey);
+  }
+
   autocompleteCache.set(trimmedQuery, {
     choices: finalChoices,
     timestamp: Date.now(),

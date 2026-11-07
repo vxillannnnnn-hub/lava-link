@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require("discord.js");
 const { actionText, errorText } = require("../../utils/responses");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
+const emojis = require("../../utils/emojis");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -24,8 +25,8 @@ module.exports = {
     const to = interaction.options.getInteger("to");
     const total = player.queue.tracks.length;
 
-    if (from > total || to > total) {
-      return interaction.reply(errorText(`Positions must be within range 1 to ${total}.`));
+    if (!from || !to || from < 1 || to < 1 || from > total || to > total) {
+      return interaction.reply(errorText(`Positions must be valid numbers between 1 and ${total}.`));
     }
 
     if (from === to) {
@@ -37,7 +38,7 @@ module.exports = {
     const title = truncate(cleanTrackTitle(track.info.title), 38);
 
     return interaction.reply(
-      actionText("↕️", `Moved **${title}** from position **#${from}** to **#${to}**.`)
+      actionText(emojis.queue, `Moved **${title}** from position **#${from}** to **#${to}**.`)
     );
   },
 };

@@ -126,7 +126,7 @@ async function executeLyricsLookup(interaction, player, queryInput = null) {
 
   const cleanTitle = truncate(result.title, 55);
   const cleanAuthor = result.author || "Unknown";
-  const lyricType = result.synced ? `${emojis.help} Real-Time Synced` : `📄 Plain Text`;
+  const lyricType = result.synced ? `${emojis.help} Real-Time Synced` : `Plain Text`;
 
   // If text is compact enough for standard Discord message limit (2000 chars), use pure markdown text!
   const textPayload = `${emojis.scroll} **Lyrics: ${cleanTitle}** — \`${cleanAuthor}\`\n\n${lyricsBody}\n\n-# ${lyricType} · Pulse Lyrics Engine`;

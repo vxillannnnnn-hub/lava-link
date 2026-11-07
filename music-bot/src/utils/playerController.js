@@ -2,6 +2,8 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   EmbedBuilder,
   MessageFlags,
 } = require("discord.js");
@@ -70,19 +72,15 @@ function buildNowPlayingEmbed(player) {
 }
 
 /**
- * Build Exact Eara 2-Row Transport Control Component Layout
- * Matches media_1794027502596_85dec848.png:
- * Row 1: [⏮] [▶/⏸] [⏭] [🤍] [⏏ Open player]
- * Row 2: [🔁] [🔀] [∞] [📑] [⏹]
+ * Build Minimal Single-Row Transport Component Layout (Option 1)
+ * Clean, modern, zero-clutter 4-button media bar:
+ * [ ⏮ Previous ] [ ⏯ Play/Pause ] [ ⏭ Skip ] [ 🎛 Controls ]
  */
 function buildNowPlayingComponents(player) {
   const isPaused = player.paused;
   const hasPrevious = (player.queue.previous?.length || 0) > 0;
-  const isAutoplay = Boolean(player.get("autoplay"));
-  const isLooping = player.repeatMode !== "off";
 
-  // Row 1 (5 items): Previous, Play/Pause, Skip, Save to DM, Open Player
-  const row1 = new ActionRowBuilder().addComponents(
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("btn_prev")
       .setEmoji(emojis.previous)
@@ -97,41 +95,138 @@ function buildNowPlayingComponents(player) {
       .setEmoji(emojis.skip)
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("btn_save")
-      .setEmoji(emojis.save)
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
       .setCustomId("btn_open_player")
       .setEmoji(emojis.openPlayer)
-      .setLabel("Open player")
+      .setLabel("Controls")
       .setStyle(ButtonStyle.Primary)
   );
 
-  // Row 2 (5 items): Repeat/Loop, Shuffle, Autoplay, Queue, Stop
-  const row2 = new ActionRowBuilder().addComponents(
+  return [row];
+}
+
+/**
+ * Build Ephemeral Audio Control Drawer Payload
+ * Complete control console (Toggles, Volume presets, DSP Filters) in an ephemeral, reactive window.
+ */
+function buildControlDrawerPayload(player) {
+  const currentTrack = player.queue.current;
+  const is247 = Boolean(player.get("247"));
+  const isAutoplay = Boolean(player.get("autoplay"));
+  const loopMode = player.repeatMode || "off";
+  const activeFilter = player.get("activeFilter") || "Flat EQ / Direct Passthrough";
+  const totalDuration = player.queue.tracks.reduce(
+    (acc, t) => acc + (t.info.duration || 0),
+    currentTrack?.info?.duration || 0
+  );
+
+  const trackTitle = currentTrack ? truncate(cleanTrackTitle(currentTrack.info.title), 36) : "No song playing";
+  const trackUri = currentTrack?.info?.uri || "https://discord.com";
+  const trackAuthor = currentTrack ? truncate(currentTrack.info.author, 24) : "Unknown";
+
+  const loopLabel = loopMode === "track" ? "Loop: Track" : loopMode === "queue" ? "Loop: Queue" : "Loop: Off";
+  const autoplayLabel = isAutoplay ? "Autoplay: ON" : "Autoplay: OFF";
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2b2d31)
+    .setTitle("Audio Console & Control Center")
+    .setDescription(
+      `${emojis.play} **Now Playing:** [${trackTitle}](${trackUri}) — \`${trackAuthor}\`\n\n` +
+      `• **Volume:** \`${player.volume}%\` · **Repeat:** \`${loopMode.toUpperCase()}\`\n` +
+      `• **Autoplay:** \`${isAutoplay ? "ENABLED" : "OFF"}\` · **24/7:** \`${is247 ? "ACTIVE" : "OFF"}\`\n` +
+      `• **Filter:** \`${activeFilter}\`\n` +
+      `• **Queue:** \`${player.queue.tracks.length} track(s)\` (\`${formatDuration(totalDuration)}\` total)\n\n` +
+      `-# Select a playback toggle, quick volume preset, or audio filter below:`
+    );
+
+  // Row 1 (5 items): Mode Toggles & Stop
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("btn_loop")
-      .setEmoji(player.repeatMode === "track" ? emojis.loopOne : emojis.loop)
-      .setStyle(isLooping ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setCustomId("ctrl_loop")
+      .setEmoji(loopMode === "track" ? emojis.loopOne : emojis.loop)
+      .setLabel(loopLabel)
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("btn_shuffle")
+      .setCustomId("ctrl_shuffle")
       .setEmoji(emojis.shuffle)
-      .setStyle(ButtonStyle.Secondary),
+      .setLabel("Shuffle")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(player.queue.tracks.length < 2),
     new ButtonBuilder()
-      .setCustomId("btn_autoplay")
+      .setCustomId("ctrl_autoplay")
       .setEmoji(emojis.autoplay)
-      .setStyle(isAutoplay ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("btn_queue")
-      .setEmoji(emojis.queue)
+      .setLabel(autoplayLabel)
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("btn_stop")
+      .setCustomId("ctrl_save")
+      .setEmoji(emojis.heart)
+      .setLabel("Save")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("ctrl_stop")
       .setEmoji(emojis.stop)
+      .setLabel("Stop")
       .setStyle(ButtonStyle.Secondary)
   );
 
-  return [row1, row2];
+  // Row 2 (4 items): Volume Presets & Queue
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ctrl_vol_50")
+      .setEmoji(emojis.volumeLow)
+      .setLabel(player.volume === 50 ? "[50%]" : "50%")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("ctrl_vol_100")
+      .setEmoji(emojis.volumeNormal)
+      .setLabel(player.volume === 100 ? "[100%]" : "100%")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("ctrl_vol_150")
+      .setEmoji(emojis.volumeBoost)
+      .setLabel(player.volume === 150 ? "[150%]" : "150%")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("ctrl_queue")
+      .setEmoji(emojis.queue)
+      .setLabel("View Queue")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Row 3 (1 item): Audio DSP Equalizer & Presets
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId("ctrl_select_filter")
+    .setPlaceholder("Select Audio Filter / DSP Preset...")
+    .addOptions([
+      new StringSelectMenuOptionBuilder()
+        .setLabel("Reset / Flat Passthrough")
+        .setDescription("Clear all active audio filters (0ms Opus Direct)")
+        .setValue("reset"),
+      new StringSelectMenuOptionBuilder()
+        .setLabel("Bass Boost")
+        .setDescription("Deep 4-band dynamic bass frequency boost")
+        .setValue("bass"),
+      new StringSelectMenuOptionBuilder()
+        .setLabel("Nightcore")
+        .setDescription("1.25x tempo speedup and high pitch elevation")
+        .setValue("nightcore"),
+      new StringSelectMenuOptionBuilder()
+        .setLabel("8D Spatial Surround")
+        .setDescription("Orbital 360° rotating spatial audio")
+        .setValue("8d"),
+      new StringSelectMenuOptionBuilder()
+        .setLabel("Vaporwave")
+        .setDescription("Slowed 0.8x tempo and deep lo-fi chillwave")
+        .setValue("vaporwave")
+    ]);
+
+  const row3 = new ActionRowBuilder().addComponents(selectMenu);
+
+  return {
+    embeds: [embed],
+    components: [row1, row2, row3],
+    flags: MessageFlags.Ephemeral,
+    allowedMentions: { parse: [], users: [] },
+  };
 }
 
 /**
@@ -382,7 +477,7 @@ async function handlePlayerButton(interaction, client) {
       const currentTitle = player.queue.current?.info?.title || "current track";
       await player.skip();
       await interaction.reply({
-        content: `⏭️ Skipped **${truncate(currentTitle, 45)}**`,
+        content: `${emojis.skip} Skipped **${truncate(currentTitle, 45)}**`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
@@ -458,47 +553,171 @@ async function handlePlayerButton(interaction, client) {
       }
     }
 
+    case "btn_controls":
     case "btn_open_player": {
-      const currentTrack = player.queue.current;
-      const is247 = Boolean(player.get("247"));
-      const isAutoplay = Boolean(player.get("autoplay"));
-      const loopMode = player.repeatMode || "off";
-      const totalDuration = player.queue.tracks.reduce(
-        (acc, t) => acc + (t.info.duration || 0),
-        currentTrack?.info?.duration || 0
-      );
+      const payload = buildControlDrawerPayload(player);
+      return interaction.reply(payload);
+    }
 
-      const trackTitle = currentTrack ? truncate(currentTrack.info.title, 40) : "No song playing";
-      const trackUri = currentTrack?.info?.uri || "https://discord.com";
-      const trackAuthor = currentTrack?.info?.author || "Unknown";
+    case "ctrl_loop": {
+      if (!checkDJ(false)) return;
+      let nextMode = "off";
+      if (player.repeatMode === "off") nextMode = "track";
+      else if (player.repeatMode === "track") nextMode = "queue";
+      else nextMode = "off";
 
-      const consoleContent =
-        `${emojis.equalizer} **Audio Console & Control Center**\n` +
-        `${emojis.play} **Now Playing:** [${trackTitle}](${trackUri}) — \`${trackAuthor}\`\n\n` +
-        `• **Volume:** \`${player.volume}%\` · **Repeat:** \`${loopMode.toUpperCase()}\`\n` +
-        `• **Autoplay:** \`${isAutoplay ? "ENABLED" : "OFF"}\` · **24/7 Mode:** \`${is247 ? "ACTIVE" : "OFF"}\`\n` +
-        `• **Queue:** \`${player.queue.tracks.length} track(s)\` (\`${formatDuration(totalDuration)}\` total)\n\n` +
-        `-# Select a quick volume preset or DSP audio filter below:`;
+      player.setRepeatMode(nextMode);
+      return await interaction.update(buildControlDrawerPayload(player));
+    }
 
-      const volRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("pctrl_vol_50").setLabel("50%").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("pctrl_vol_100").setLabel("100%").setStyle(player.volume === 100 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("pctrl_vol_150").setLabel("150%").setStyle(ButtonStyle.Secondary)
-      );
-
-      const filterRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("pctrl_filter_bass").setLabel("Bass Boost").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("pctrl_filter_nightcore").setLabel("Nightcore").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("pctrl_filter_8d").setLabel("8D Audio").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("pctrl_filter_clear").setLabel("Reset EQ").setStyle(ButtonStyle.Danger)
-      );
-
-      return interaction.reply({
-        content: consoleContent,
-        components: [volRow, filterRow],
+    case "ctrl_shuffle": {
+      if (!checkDJ(false)) return;
+      if (player.queue.tracks.length < 2) {
+        return interaction.reply({
+          content: `${emojis.warn} Not enough songs in queue to shuffle (minimum 2 needed).`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+      player.queue.shuffle();
+      await interaction.update(buildControlDrawerPayload(player));
+      await interaction.followUp({
+        content: `${emojis.shuffle} Shuffled **${player.queue.tracks.length}** songs in queue!`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
+      break;
+    }
+
+    case "ctrl_autoplay": {
+      if (!checkDJ(false)) return;
+      const currentAutoplay = Boolean(player.get("autoplay"));
+      const newAutoplay = !currentAutoplay;
+      player.set("autoplay", newAutoplay);
+
+      const seedTrack = player.queue.current || player.queue.previous[0] || player.get("lastPlayedTrack");
+      if (newAutoplay && seedTrack) {
+        if (!player.playing && player.queue.tracks.length === 0) {
+          await autoplayManager.executeAutoplay(player, seedTrack, false);
+        } else {
+          autoplayManager.prefetchAutoplay(player, seedTrack);
+        }
+      }
+
+      return await interaction.update(buildControlDrawerPayload(player));
+    }
+
+    case "ctrl_stop": {
+      if (!checkDJ(false)) return;
+      player.queue.tracks.splice(0, player.queue.tracks.length);
+      await player.destroy("User pressed Stop button in Controls Drawer");
+      return await interaction.update({
+        content: `${emojis.stop} Playback stopped, queue cleared, and disconnected from voice channel.`,
+        embeds: [],
+        components: [],
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+
+    case "ctrl_save": {
+      const track = player.queue.current;
+      if (!track) {
+        return interaction.reply({
+          content: `${emojis.cross} No song is currently streaming.`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+
+      db.addFavorite(interaction.user.id, track);
+
+      const cleanTitle = truncate(track.info.title, 50);
+      const uri = track.info.uri || "https://discord.com";
+
+      const dmRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setStyle(ButtonStyle.Link)
+          .setLabel("Open Song")
+          .setURL(uri)
+      );
+
+      const dmContent =
+        `${emojis.heart} **Saved to Favorites: [${cleanTitle}](${uri})**\n` +
+        `• **Artist:** \`${track.info.author || "Unknown"}\`\n` +
+        `• **Duration:** \`${formatDuration(track.info.duration)}\`\n` +
+        `• **Server:** \`${interaction.guild.name}\`\n\n` +
+        `-# Use \`/playlist play-favorites\` to stream all your saved songs anytime!`;
+
+      try {
+        await interaction.user.send({
+          content: dmContent,
+          components: [dmRow],
+          allowedMentions: { parse: [], users: [] },
+        });
+        return interaction.reply({
+          content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites & sent details to your DMs!\n-# Use \`/playlist play-favorites\` to stream anytime`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      } catch {
+        return interaction.reply({
+          content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites!\n-# Use \`/playlist play-favorites\` to stream anytime`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+    }
+
+    case "ctrl_queue": {
+      const current = player.queue.current;
+      const tracks = player.queue.tracks;
+
+      if (!current && tracks.length === 0) {
+        return interaction.reply({
+          content: `${emojis.queue} The queue is currently empty. Use \`/play\` to add tracks!`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+
+      const queueItems = tracks.slice(0, 10).map((t, idx) => {
+        return `\`${idx + 1}.\` [${truncate(t.info.title, 36)}](${t.info.uri || "https://discord.com"}) — \`${formatDuration(t.info.duration)}\``;
+      });
+
+      const remaining = tracks.length > 10 ? `\n*...and ${tracks.length - 10} more tracks*` : "";
+      const totalDuration = tracks.reduce(
+        (acc, t) => acc + (t.info.duration || 0),
+        current?.info?.duration || 0
+      );
+
+      const queueContent =
+        `${emojis.queue} **Upcoming Queue — ${tracks.length} track(s)**\n\n` +
+        `${emojis.play} **Now Playing:** [${truncate(current?.info?.title || "Nothing", 40)}](${current?.info?.uri || "https://discord.com"})\n\n` +
+        `**Next Tracks:**\n${queueItems.length > 0 ? queueItems.join("\n") + remaining : "*No upcoming tracks in queue.*"}\n\n` +
+        `-# Total Duration: \`${formatDuration(totalDuration)}\` · Autoplay: \`${player.get("autoplay") ? "ON" : "OFF"}\``;
+
+      return interaction.reply({
+        content: queueContent,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+
+    case "ctrl_vol_50": {
+      if (!checkDJ(false)) return;
+      await player.setVolume(50);
+      return await interaction.update(buildControlDrawerPayload(player));
+    }
+    case "ctrl_vol_100": {
+      if (!checkDJ(false)) return;
+      await player.setVolume(100);
+      return await interaction.update(buildControlDrawerPayload(player));
+    }
+    case "ctrl_vol_150": {
+      if (!checkDJ(false)) return;
+      await player.setVolume(150);
+      return await interaction.update(buildControlDrawerPayload(player));
     }
 
     case "btn_loop": {
@@ -697,59 +916,59 @@ async function handleFilterSelect(interaction, client) {
   }
 
   const selected = values[0];
+  let filterName = "None (Flat / Direct Passthrough)";
+
   switch (selected) {
     case "reset":
       await player.filterManager.resetFilters();
-      return interaction.reply({
-        content: `${emojis.filters.reset} Reset all filters to default flat EQ.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", null);
+      filterName = "None (Flat / Direct Passthrough)";
+      break;
     case "8d":
       await player.filterManager.resetFilters();
       await player.filterManager.toggleRotation();
-      return interaction.reply({
-        content: `${emojis.filters.spatial8D} Activated **8D Spatial Audio**.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", "8D Spatial Audio");
+      filterName = "8D Spatial Audio";
+      break;
     case "nightcore":
       await player.filterManager.resetFilters();
       await player.filterManager.toggleNightcore();
-      return interaction.reply({
-        content: `${emojis.filters.nightcore} Activated **Nightcore**.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", "Nightcore");
+      filterName = "Nightcore";
+      break;
     case "vaporwave":
       await player.filterManager.resetFilters();
       await player.filterManager.toggleVaporwave();
-      return interaction.reply({
-        content: `${emojis.filters.vaporwave} Activated **Vaporwave**.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", "Vaporwave");
+      filterName = "Vaporwave";
+      break;
     case "bass":
       await player.filterManager.resetFilters();
       await player.filterManager.setEqualizer([{ band: 0, gain: 0.25 }, { band: 1, gain: 0.20 }, { band: 2, gain: 0.15 }]);
-      return interaction.reply({
-        content: `${emojis.filters.bass} Activated **Bass Boost**.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", "Bass Boost");
+      filterName = "Bass Boost";
+      break;
     default:
       await player.filterManager.resetFilters();
-      return interaction.reply({
-        content: `${emojis.filters.reset} Reset filters.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      player.set("activeFilter", null);
+      break;
   }
+
+  if (interaction.customId === "ctrl_select_filter") {
+    return await interaction.update(buildControlDrawerPayload(player));
+  }
+
+  return interaction.reply({
+    content: `${emojis.check} Audio filter set to **${filterName}**.`,
+    flags: MessageFlags.Ephemeral,
+    allowedMentions: { parse: [], users: [] },
+  });
 }
 
 module.exports = {
   buildNowPlayingEmbed,
   buildNowPlayingComponents,
+  buildControlDrawerPayload,
   sendOrUpdatePlayerDashboard,
   updatePlayerInteraction,
   handlePlayerButton,

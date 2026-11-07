@@ -29,7 +29,7 @@ koe:
     useEpoll: true # Linux native C-epoll network transport (lowest UDP voice latency)
     useKQueue: false
     highPacketPriority: true # Real-time scheduling priority for Discord voice frames
-    bufferDurationMs: 300 # Low-jitter native audio queue (ultra-low latency)
+    bufferDurationMs: 400 # Optimized low-jitter native audio queue (ultra-low latency, zero GC stutters)
     byteBufAllocator: "pooled" # Netty pooled off-heap direct buffers
 
 lavalink:
@@ -37,19 +37,20 @@ lavalink:
     pluginsDir: "./plugins"
     server:
         password: "YOUR_LAVALINK_PASSWORD" # Change this password
-        bufferDurationMs: 300 # JDA-NAS audio queue size (ms)
-        frameBufferDurationMs: 1500 # Pre-buffered frames: 1.5s for instant <100ms track starts
+        bufferDurationMs: 400 # JDA-NAS audio queue size (ms) - optimal balance against GC pauses
+        frameBufferDurationMs: 5000 # Pre-buffered frames: 5.0s prevents stuttering during internet packet loss
         playerUpdateInterval: 2
-        opusEncodingQuality: 10 # Studio grade: 10 is maximum VBR Opus complexity
-        resamplingQuality: HIGH # Audiophile grade: band-limited sinc interpolation (zero aliasing)
+        opusEncodingQuality: 10 # Studio grade: 10 is maximum VBR Opus complexity (510 kbps ceiling)
+        resamplingQuality: HIGH # Audiophile grade: band-limited sinc interpolation (zero aliasing at 48kHz)
         trackStuckThresholdMs: 8000
         useSeekGhosting: false
+        nonAllocatingFrameBuffer: false # Smooth frame rebuilding for volume & filter transitions
         gcWarnings: false
         koe:
             useEpoll: true
             useKQueue: false
             highPacketPriority: true
-            bufferDurationMs: 300
+            bufferDurationMs: 400
             byteBufAllocator: "pooled"
         youtubeSearchEnabled: false # Handled via dev.lavalink.youtube
         soundcloudSearchEnabled: true
@@ -84,11 +85,10 @@ plugins:
         allowDirectVideoIds: true
         allowDirectPlaylistIds: true
         clients:
-            - ANDROID_VR
+            - MUSIC # High-bitrate 256kbps Opus/AAC audio master streams
+            - ANDROID_MUSIC # Secondary high-bitrate audio client
+            - ANDROID_VR # Bot-detection evasion fallback
             - TVHTML5_SIMPLY
-            - ANDROID_MUSIC
-            - MUSIC
-            - WEBEMBEDDED
             - WEB
             - IOS
             - MWEB

@@ -34,12 +34,16 @@ module.exports = {
           `Current volume is **${currentVol}%**.`,
           "Adjust with `/volume <0-200>` or quick presets below:",
           [
-            { customId: "pctrl_vol_50", label: "50%", emoji: emojis.volume.low, style: currentVol === 50 ? ButtonStyle.Primary : ButtonStyle.Secondary },
-            { customId: "pctrl_vol_100", label: "100%", emoji: emojis.volume.normal, style: currentVol === 100 ? ButtonStyle.Primary : ButtonStyle.Secondary },
-            { customId: "pctrl_vol_150", label: "150%", emoji: emojis.volume.boost, style: currentVol === 150 ? ButtonStyle.Primary : ButtonStyle.Secondary },
+            { customId: "pctrl_vol_50", label: "50%", emoji: emojis.volume.low, style: ButtonStyle.Secondary },
+            { customId: "pctrl_vol_100", label: "100%", emoji: emojis.volume.normal, style: ButtonStyle.Secondary },
+            { customId: "pctrl_vol_150", label: "150%", emoji: emojis.volume.boost, style: ButtonStyle.Secondary },
           ]
         )
       );
+    }
+
+    if (level < 0 || level > 200) {
+      return interaction.reply(errorText("Volume level must be between 0% and 200%."));
     }
 
     const djCheck = djManager.canManagePlayer(interaction.member, player, false);
@@ -62,9 +66,9 @@ module.exports = {
         `Volume set to **${level}%**.`,
         sub,
         [
-          { customId: "pctrl_vol_50", label: "50%", emoji: emojis.volume.low, style: level === 50 ? ButtonStyle.Primary : ButtonStyle.Secondary },
-          { customId: "pctrl_vol_100", label: "100%", emoji: emojis.volume.normal, style: level === 100 ? ButtonStyle.Primary : ButtonStyle.Secondary },
-          { customId: "pctrl_vol_150", label: "150%", emoji: emojis.volume.boost, style: level === 150 ? ButtonStyle.Primary : ButtonStyle.Secondary },
+          { customId: "pctrl_vol_50", label: "50%", emoji: emojis.volume.low, style: ButtonStyle.Secondary },
+          { customId: "pctrl_vol_100", label: "100%", emoji: emojis.volume.normal, style: ButtonStyle.Secondary },
+          { customId: "pctrl_vol_150", label: "150%", emoji: emojis.volume.boost, style: ButtonStyle.Secondary },
         ]
       )
     );

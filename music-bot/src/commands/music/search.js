@@ -5,6 +5,7 @@ const {
   StringSelectMenuOptionBuilder,
   EmbedBuilder,
   MessageFlags,
+  PermissionFlagsBits,
 } = require("discord.js");
 const { trackEnqueuedEmbed, errorEmbed } = require("../../utils/embed");
 const { formatDuration, truncate } = require("../../utils/formatters");
@@ -32,10 +33,10 @@ module.exports = {
         .setName("source")
         .setDescription("Streaming platform to query")
         .addChoices(
-          { name: "🟢 Spotify", value: "spsearch" },
-          { name: "🔴 YouTube", value: "ytsearch" },
-          { name: "🟠 SoundCloud", value: "scsearch" },
-          { name: "🔷 JioSaavn", value: "jssearch" }
+          { name: "Spotify", value: "spsearch" },
+          { name: "YouTube", value: "ytsearch" },
+          { name: "SoundCloud", value: "scsearch" },
+          { name: "JioSaavn", value: "jssearch" }
         )
     ),
 
@@ -50,11 +51,28 @@ module.exports = {
     const query = interaction.options.getString("query");
     const forcedSource = interaction.options.getString("source") || config.player.defaultSearchPlatform;
     const member = interaction.member;
-    const voiceChannel = member.voice.channel;
+    const voiceChannel = member?.voice?.channel;
 
     if (!voiceChannel) {
       return interaction.reply({
         content: `${emojis.warn} You need to be in a voice channel to search music!`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+
+    const me = interaction.guild.members.me;
+    const perms = voiceChannel.permissionsFor(me);
+    if (!perms?.has(PermissionFlagsBits.Connect)) {
+      return interaction.reply({
+        content: `${emojis.cross} I lack permission to **Connect** to <#${voiceChannel.id}>.`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+    if (!perms?.has(PermissionFlagsBits.Speak)) {
+      return interaction.reply({
+        content: `${emojis.cross} I lack permission to **Speak** in <#${voiceChannel.id}>.`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
@@ -135,7 +153,7 @@ module.exports = {
       .setTitle(`Results for "${truncate(query, 40)}"`)
       .setDescription(
         descriptionLines.join("\n") +
-        "\n\n-# ⏱️ Select a track from the dropdown below within 60 seconds."
+        "\n\n-# Select a track from the dropdown below within 60 seconds."
       )
       .setTimestamp();
 
@@ -183,7 +201,26 @@ module.exports = {
       });
     }
 
-    const player = searchData.player;
+    let player = client.lavalink.getPlayer(interaction.guildId);
+    if (!player || !player.connected) {
+      const voiceChannel = interaction.member?.voice?.channel;
+      if (!voiceChannel) {
+        return interaction.reply({
+          content: `${emojis.cross} Audio player was disconnected. Please join a voice channel and run \`/play\` again.`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
+      player = client.lavalink.createPlayer({
+        guildId: interaction.guildId,
+        voiceChannelId: voiceChannel.id,
+        textChannelId: interaction.channelId,
+        selfDeaf: true,
+        volume: config.player.defaultVolume,
+      });
+      await player.connect();
+    }
+
     player.queue.add(chosenTrack);
 
     if (!player.playing && !player.paused) {
