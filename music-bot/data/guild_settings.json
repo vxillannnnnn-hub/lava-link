@@ -12,5 +12,47 @@
     "text_247_channel_id": null,
     "bot_247_user_id": null,
     "updated_at": 1794036672279
+  },
+  "test_guild_999": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "mode_247": false,
+    "voice_247_channel_id": null,
+    "text_247_channel_id": null,
+    "bot_247_user_id": null,
+    "updated_at": 1794036770057
+  },
+  "1524739596670337197": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "mode_247": true,
+    "voice_247_channel_id": "1524739599082066115",
+    "text_247_channel_id": "1524739598935396421",
+    "bot_247_user_id": "1568539143032668180",
+    "updated_at": 1794069481513
+  },
+  "1555968929023664208": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "mode_247": true,
+    "voice_247_channel_id": "1555968937467056231",
+    "text_247_channel_id": "1555968935935877191",
+    "bot_247_user_id": "1568538354742722691",
+    "updated_at": 1794071539911
   }
 }
