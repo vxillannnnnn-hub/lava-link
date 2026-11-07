@@ -98,7 +98,7 @@ function initLavalink(client) {
   // ---------------------------------------------------------------------------
   // Player Audio Lifecycle Events
   // ---------------------------------------------------------------------------
-  manager.on("trackStart", async (player, track) => {
+  manager.on("trackStart", (player, track) => emojis.runWithClient(client, async () => {
     if (!player.textChannelId) return;
     const channel = client.channels.cache.get(player.textChannelId);
 
@@ -142,15 +142,15 @@ function initLavalink(client) {
     } catch (err) {
       logger.error("Failed to send trackStart dashboard:", err.message);
     }
-  });
+  }));
 
-  manager.on("trackEnd", async (player, track) => {
+  manager.on("trackEnd", (player, track) => emojis.runWithClient(client, async () => {
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
     voiceStatusManager.onTrackEnd(client, player);
     presenceManager.onTrackEnd(client);
-  });
+  }));
 
-  manager.on("trackStuck", async (player, track, payload) => {
+  manager.on("trackStuck", (player, track, payload) => emojis.runWithClient(client, async () => {
     logger.warn(`Track stuck: "${track.info.title}" in guild ${player.guildId} threshold ${payload.thresholdMs}ms`);
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
@@ -162,9 +162,9 @@ function initLavalink(client) {
       }
     }
     await player.skip();
-  });
+  }));
 
-  manager.on("trackError", async (player, track, payload) => {
+  manager.on("trackError", (player, track, payload) => emojis.runWithClient(client, async () => {
     logger.error(`Track error: "${track.info.title}" in guild ${player.guildId}:`, payload.error || payload.message);
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
@@ -176,9 +176,9 @@ function initLavalink(client) {
       }
     }
     await player.skip();
-  });
+  }));
 
-  manager.on("queueEnd", async (player, track) => {
+  manager.on("queueEnd", (player, track) => emojis.runWithClient(client, async () => {
     logger.info(`Queue ended in guild ${player.guildId}`);
 
     // If Autoplay is enabled, execute fallback recommendation
@@ -236,9 +236,9 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
       }
     }
-  });
+  }));
 
-  manager.on("playerDestroy", (player) => {
+  manager.on("playerDestroy", (player) => emojis.runWithClient(client, () => {
     logger.debug(`Player destroyed for guild ${player.guildId}`);
     updateRequestChannelDashboard(client, player.guildId, null);
     voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
@@ -250,7 +250,7 @@ function initLavalink(client) {
         channel.messages.delete(prevMsgId).catch(() => {});
       }
     }
-  });
+  }));
 
   return manager;
 }

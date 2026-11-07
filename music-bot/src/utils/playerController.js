@@ -109,6 +109,8 @@ function buildNowPlayingComponents(player) {
  * Complete control console (Toggles, Volume presets, DSP Filters) in an ephemeral, reactive window.
  */
 function buildControlDrawerPayload(player) {
+  const client = player.lavalink?.client;
+  return emojis.runWithClient(client, () => {
   const currentTrack = player.queue.current;
   const is247 = Boolean(player.get("247"));
   const isAutoplay = Boolean(player.get("autoplay"));
@@ -227,37 +229,45 @@ function buildControlDrawerPayload(player) {
     flags: MessageFlags.Ephemeral,
     allowedMentions: { parse: [], users: [] },
   };
+  });
 }
 
 /**
  * Build standard Discord embed fallback payload (Zero Pings guaranteed)
  */
 function getFallbackEmbedPayload(player) {
-  const components = buildNowPlayingComponents(player);
-  return {
-    embeds: [buildNowPlayingEmbed(player)],
-    components,
-    allowedMentions: { parse: [], users: [] },
-  };
+  const client = player.lavalink?.client;
+  const runner = client ? (fn) => emojis.runWithClient(client, fn) : (fn) => fn();
+  return runner(() => {
+    const components = buildNowPlayingComponents(player);
+    return {
+      embeds: [buildNowPlayingEmbed(player)],
+      components,
+      allowedMentions: { parse: [], users: [] },
+    };
+  });
 }
 
 /**
  * Build the payload for sending or editing the dashboard
  */
 function getDashboardPayload(player) {
-  const components = buildNowPlayingComponents(player);
+  const client = player.lavalink?.client;
+  return emojis.runWithClient(client, () => {
+    const components = buildNowPlayingComponents(player);
 
-  if (config.player.useComponentsV2) {
-    try {
-      const v2Payload = buildComponentsV2Payload(player, components);
-      v2Payload.allowed_mentions = { parse: [], users: [] };
-      return v2Payload;
-    } catch (err) {
-      logger.debug("Components V2 payload error:", err.message);
+    if (config.player.useComponentsV2) {
+      try {
+        const v2Payload = buildComponentsV2Payload(player, components);
+        v2Payload.allowed_mentions = { parse: [], users: [] };
+        return v2Payload;
+      } catch (err) {
+        logger.debug("Components V2 payload error:", err.message);
+      }
     }
-  }
 
-  return getFallbackEmbedPayload(player);
+    return getFallbackEmbedPayload(player);
+  });
 }
 
 /**

@@ -3,12 +3,14 @@ const { parseMessage } = require("../../utils/prefixParser");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 const CommandContext = require("../../structures/CommandContext");
 const { warnText, errorText } = require("../../utils/responses");
+const { runWithClient } = require("../../utils/emojis");
 const db = require("../../database/db");
 const logger = require("../../utils/logger");
 
 module.exports = {
   name: "messageCreate",
   async execute(message, client) {
+    return runWithClient(client, async () => {
     if (!message || message.author?.bot || !message.guild) return;
 
     // 1. Dedicated Song-Request Channel routing (e.g. #song-requests)
@@ -81,5 +83,6 @@ module.exports = {
         await ctx.reply(errorText(`Error executing command: \`${err.message}\``));
       } catch (_) {}
     }
+    });
   },
 };

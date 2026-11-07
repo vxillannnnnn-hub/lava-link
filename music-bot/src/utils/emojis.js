@@ -7,9 +7,14 @@
  * Every command, button, status notice, volume preset, embed, and progress bar dynamically
  * reads from this single file. No other files have to be touched.
  * 
- * All default emojis below are 100% static, monochrome white vector emojis synced
- * directly into your Discord server for a crisp, professional Eara-style look.
+ * Supports Multi-Bot Fleet Contextual Resolution:
+ * Automatically resolves the owning bot's own Discord Application Emojis dynamically
+ * via AsyncLocalStorage so all bots (Primary, Clone 1, Clone 2, Clone 3) render crisp,
+ * monochrome emojis in external servers for all users without Nitro.
  */
+
+const { AsyncLocalStorage } = require("async_hooks");
+const clientContext = new AsyncLocalStorage();
 
 const UNICODE_FALLBACKS = {
   play: "▶",
@@ -51,7 +56,7 @@ const UNICODE_FALLBACKS = {
 
 const EMOJI_CONFIG = {
   // ---------------------------------------------------------------------------
-  // 1. PLAYER TRANSPORT CONTROLS (Monochrome White Static Guild Emojis)
+  // 1. PLAYER TRANSPORT CONTROLS (Default to Primary Bot Application Emojis)
   // ---------------------------------------------------------------------------
   play: "<:play:1568636872971001916>",
   pause: "<:pause:1568636879945859094>",
@@ -165,75 +170,96 @@ const EMOJI_CONFIG = {
 const GITHUB_ASSETS_BASE = "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis";
 let isFallbackMode = false;
 
+// Multi-bot fleet emojis lookup table
+let fleetEmojis = {};
+try {
+  const fleetData = require("./applicationEmojis.json");
+  if (fleetData && fleetData.fleet) {
+    fleetEmojis = fleetData.fleet;
+  }
+} catch (_) {}
+
 // Unified shared dictionary supporting both top-level and categorized access
 const emojis = {
   ...EMOJI_CONFIG,
 
-  // Categorized namespaces
-  player: {
-    previous: EMOJI_CONFIG.previous,
-    play: EMOJI_CONFIG.play,
-    pause: EMOJI_CONFIG.pause,
-    playpause: EMOJI_CONFIG.playpause,
-    skip: EMOJI_CONFIG.skip,
-    stop: EMOJI_CONFIG.stop,
-    loop: EMOJI_CONFIG.loop,
-    loopOne: EMOJI_CONFIG.loopOne,
-    shuffle: EMOJI_CONFIG.shuffle,
-    autoplay: EMOJI_CONFIG.autoplay,
-    save: EMOJI_CONFIG.save,
-    heart: EMOJI_CONFIG.heart,
-    openPlayer: EMOJI_CONFIG.openPlayer,
-    queue: EMOJI_CONFIG.queue,
+  // Categorized namespaces dynamically evaluated through Proxy
+  get player() {
+    return {
+      previous: proxyEmojis.previous,
+      play: proxyEmojis.play,
+      pause: proxyEmojis.pause,
+      playpause: proxyEmojis.playpause,
+      skip: proxyEmojis.skip,
+      stop: proxyEmojis.stop,
+      loop: proxyEmojis.loop,
+      loopOne: proxyEmojis.loopOne,
+      shuffle: proxyEmojis.shuffle,
+      autoplay: proxyEmojis.autoplay,
+      save: proxyEmojis.save,
+      heart: proxyEmojis.heart,
+      openPlayer: proxyEmojis.openPlayer,
+      queue: proxyEmojis.queue,
+    };
   },
 
-  volume: {
-    mute: EMOJI_CONFIG.volumeMute,
-    low: EMOJI_CONFIG.volumeLow,
-    normal: EMOJI_CONFIG.volumeNormal,
-    boost: EMOJI_CONFIG.volumeBoost,
+  get volume() {
+    return {
+      mute: proxyEmojis.volumeMute,
+      low: proxyEmojis.volumeLow,
+      normal: proxyEmojis.volumeNormal,
+      boost: proxyEmojis.volumeBoost,
+    };
   },
 
-  filters: {
-    spatial8D: EMOJI_CONFIG.filter8D,
-    bass: EMOJI_CONFIG.filterBass,
-    nightcore: EMOJI_CONFIG.filterNightcore,
-    vaporwave: EMOJI_CONFIG.filterVaporwave,
-    karaoke: EMOJI_CONFIG.filterKaraoke,
-    pop: EMOJI_CONFIG.filterPop,
-    rock: EMOJI_CONFIG.filterRock,
-    normalizer: EMOJI_CONFIG.filterNormalizer,
-    reset: EMOJI_CONFIG.filterReset,
+  get filters() {
+    return {
+      spatial8D: proxyEmojis.filter8D,
+      bass: proxyEmojis.filterBass,
+      nightcore: proxyEmojis.filterNightcore,
+      vaporwave: proxyEmojis.filterVaporwave,
+      karaoke: proxyEmojis.filterKaraoke,
+      pop: proxyEmojis.filterPop,
+      rock: proxyEmojis.filterRock,
+      normalizer: proxyEmojis.filterNormalizer,
+      reset: proxyEmojis.filterReset,
+    };
   },
 
-  platforms: {
-    spotify: EMOJI_CONFIG.spotify,
-    youtube: EMOJI_CONFIG.youtube,
-    soundcloud: EMOJI_CONFIG.soundcloud,
-    jiosaavn: EMOJI_CONFIG.jiosaavn,
-    bandcamp: EMOJI_CONFIG.bandcamp,
-    twitch: EMOJI_CONFIG.twitch,
-    web: EMOJI_CONFIG.web,
-    music: EMOJI_CONFIG.music,
+  get platforms() {
+    return {
+      spotify: proxyEmojis.spotify,
+      youtube: proxyEmojis.youtube,
+      soundcloud: proxyEmojis.soundcloud,
+      jiosaavn: proxyEmojis.jiosaavn,
+      bandcamp: proxyEmojis.bandcamp,
+      twitch: proxyEmojis.twitch,
+      web: proxyEmojis.web,
+      music: proxyEmojis.music,
+    };
   },
 
-  status: {
-    success: EMOJI_CONFIG.success,
-    error: EMOJI_CONFIG.error,
-    warn: EMOJI_CONFIG.warn,
-    info: EMOJI_CONFIG.info,
-    sparkles: EMOJI_CONFIG.sparkles,
-    fire: EMOJI_CONFIG.fire,
-    pin: EMOJI_CONFIG.pin,
-    live: EMOJI_CONFIG.live,
+  get status() {
+    return {
+      success: proxyEmojis.success,
+      error: proxyEmojis.error,
+      warn: proxyEmojis.warn,
+      info: proxyEmojis.info,
+      sparkles: proxyEmojis.sparkles,
+      fire: proxyEmojis.fire,
+      pin: proxyEmojis.pin,
+      live: proxyEmojis.live,
+    };
   },
 
-  progress: {
-    filled: "▰",
-    empty: "▱",
-    dot: "●",
-    lineFilled: "━",
-    lineEmpty: "─",
+  get progress() {
+    return {
+      filled: "▰",
+      empty: "▱",
+      dot: "●",
+      lineFilled: "━",
+      lineEmpty: "─",
+    };
   },
 
   /**
@@ -243,22 +269,22 @@ const emojis = {
     const src = (sourceName || "").toLowerCase();
     switch (src) {
       case "spotify":
-        return `${EMOJI_CONFIG.spotify} Spotify`;
+        return `${proxyEmojis.spotify} Spotify`;
       case "youtube":
-        return `${EMOJI_CONFIG.youtube} YouTube`;
+        return `${proxyEmojis.youtube} YouTube`;
       case "soundcloud":
-        return `${EMOJI_CONFIG.soundcloud} SoundCloud`;
+        return `${proxyEmojis.soundcloud} SoundCloud`;
       case "jiosaavn":
-        return `${EMOJI_CONFIG.jiosaavn} JioSaavn`;
+        return `${proxyEmojis.jiosaavn} JioSaavn`;
       case "bandcamp":
-        return `${EMOJI_CONFIG.bandcamp} Bandcamp`;
+        return `${proxyEmojis.bandcamp} Bandcamp`;
       case "twitch":
-        return `${EMOJI_CONFIG.twitch} Twitch`;
+        return `${proxyEmojis.twitch} Twitch`;
       case "http":
       case "https":
-        return `${EMOJI_CONFIG.web} Web Stream`;
+        return `${proxyEmojis.web} Web Stream`;
       default:
-        return `${EMOJI_CONFIG.music} Audio`;
+        return `${proxyEmojis.music} Audio`;
     }
   },
 
@@ -266,10 +292,10 @@ const emojis = {
    * Helper to get appropriate volume emoji for level percentage
    */
   getVolumeEmoji(level) {
-    if (level === 0) return EMOJI_CONFIG.volumeMute;
-    if (level < 50) return EMOJI_CONFIG.volumeLow;
-    if (level <= 100) return EMOJI_CONFIG.volumeNormal;
-    return EMOJI_CONFIG.volumeBoost;
+    if (level === 0) return proxyEmojis.volumeMute;
+    if (level < 50) return proxyEmojis.volumeLow;
+    if (level <= 100) return proxyEmojis.volumeNormal;
+    return proxyEmojis.volumeBoost;
   },
 
   /**
@@ -277,14 +303,22 @@ const emojis = {
    */
   createProgressBar(current, total, size = 12) {
     if (!total || total === 0 || isNaN(total) || total === Infinity) {
-      return `${EMOJI_CONFIG.live} \`[LIVE STREAM]\``;
+      return `${proxyEmojis.live} \`[LIVE STREAM]\``;
     }
     const clampedCurrent = Math.min(Math.max(current, 0), total);
     const progress = Math.min(Math.max(clampedCurrent / total, 0), 1);
     const filledBlocks = Math.round(progress * size);
 
-    // Seamless custom monochrome server emojis (Eara exact match)
-    if (EMOJI_CONFIG.bar_lf && EMOJI_CONFIG.bar_le) {
+    const bar_lf = proxyEmojis.bar_lf;
+    const bar_mf = proxyEmojis.bar_mf;
+    const bar_rf = proxyEmojis.bar_rf;
+    const bar_le = proxyEmojis.bar_le;
+    const bar_me = proxyEmojis.bar_me;
+    const bar_re = proxyEmojis.bar_re;
+    const bar_single_f = proxyEmojis.bar_single_f;
+
+    // Seamless custom monochrome server emojis
+    if (bar_lf && bar_le) {
       let bar = "";
       for (let i = 0; i < size; i++) {
         const isFirst = i === 0;
@@ -292,15 +326,15 @@ const emojis = {
         const isFilled = i < filledBlocks;
 
         if (isFirst) {
-          if (filledBlocks === 1 && EMOJI_CONFIG.bar_single_f) {
-            bar += EMOJI_CONFIG.bar_single_f;
+          if (filledBlocks === 1 && bar_single_f) {
+            bar += bar_single_f;
           } else {
-            bar += isFilled ? EMOJI_CONFIG.bar_lf : EMOJI_CONFIG.bar_le;
+            bar += isFilled ? bar_lf : bar_le;
           }
         } else if (isLast) {
-          bar += isFilled ? EMOJI_CONFIG.bar_rf : EMOJI_CONFIG.bar_re;
+          bar += isFilled ? bar_rf : bar_re;
         } else {
-          bar += isFilled ? EMOJI_CONFIG.bar_mf : EMOJI_CONFIG.bar_me;
+          bar += isFilled ? bar_mf : bar_me;
         }
       }
       return bar;
@@ -321,8 +355,13 @@ const emojis = {
     if (isFallbackMode) {
       return UNICODE_FALLBACKS[key] || "•";
     }
-    if (client?.user?.id && fleetEmojis[client.user.id]?.[key]) {
-      return fleetEmojis[client.user.id][key];
+    const targetClient = client || clientContext.getStore();
+    const botId = targetClient?.user?.id || (typeof targetClient === "string" ? targetClient : null);
+    if (botId && fleetEmojis[botId]?.[key]) {
+      return fleetEmojis[botId][key];
+    }
+    if (targetClient?.emojisMap?.[key]) {
+      return targetClient.emojisMap[key];
     }
     return EMOJI_CONFIG[key] || UNICODE_FALLBACKS[key] || "";
   },
@@ -364,24 +403,39 @@ const emojis = {
     return isFallbackMode;
   },
 
+  /**
+   * Scope an asynchronous function call to a specific bot client instance
+   */
+  runWithClient(client, fn) {
+    if (!client) return fn();
+    return clientContext.run(client, fn);
+  },
+
+  getActiveClient() {
+    return clientContext.getStore() || null;
+  },
+
   cdnBase: GITHUB_ASSETS_BASE,
   unicode: UNICODE_FALLBACKS,
 };
 
-// Optional fleet emojis lookup if multi-bot applications are configured
-let fleetEmojis = {};
-try {
-  const fleetData = require("./applicationEmojis.json");
-  if (fleetData && fleetData.fleet) {
-    fleetEmojis = fleetData.fleet;
-  }
-} catch (_) {}
-
 // Wrap in dynamic Proxy so when isFallbackMode is toggled, emojis.play automatically returns unicode "▶"
+// and when an active client is running, emojis.play automatically returns THAT bot's application emoji!
 const proxyEmojis = new Proxy(emojis, {
   get(target, prop, receiver) {
-    if (isFallbackMode && typeof prop === "string" && UNICODE_FALLBACKS[prop]) {
+    if (typeof prop !== "string") {
+      return Reflect.get(target, prop, receiver);
+    }
+    if (isFallbackMode && UNICODE_FALLBACKS[prop]) {
       return UNICODE_FALLBACKS[prop];
+    }
+    const currentClient = clientContext.getStore();
+    const botId = currentClient?.user?.id || (typeof currentClient === "string" ? currentClient : null);
+    if (botId && fleetEmojis[botId]?.[prop]) {
+      return fleetEmojis[botId][prop];
+    }
+    if (currentClient?.emojisMap?.[prop]) {
+      return currentClient.emojisMap[prop];
     }
     return Reflect.get(target, prop, receiver);
   },

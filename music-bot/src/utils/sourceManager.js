@@ -8,35 +8,35 @@ const emojis = require("./emojis");
 const PLATFORM_THEMES = {
   spotify: {
     name: "Spotify",
-    badge: emojis.getPlatformBadge("spotify"),
+    get badge() { return emojis.getPlatformBadge("spotify"); },
     color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "spsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/spotify_logo_icon_169824.png",
   },
   youtube: {
     name: "YouTube",
-    badge: emojis.getPlatformBadge("youtube"),
+    get badge() { return emojis.getPlatformBadge("youtube"); },
     color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "ytsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/youtube_logo_icon_168737.png",
   },
   soundcloud: {
     name: "SoundCloud",
-    badge: emojis.getPlatformBadge("soundcloud"),
+    get badge() { return emojis.getPlatformBadge("soundcloud"); },
     color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "scsearch",
     icon: "https://cdn.icon-icons.com/icons2/2699/PNG/512/soundcloud_logo_icon_168864.png",
   },
   jiosaavn: {
     name: "JioSaavn",
-    badge: emojis.getPlatformBadge("jiosaavn"),
+    get badge() { return emojis.getPlatformBadge("jiosaavn"); },
     color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "jssearch",
     icon: "https://upload.wikimedia.org/wikipedia/commons/e/ed/JioSaavn_Logo.svg",
   },
   stream: {
     name: "Web Stream",
-    badge: emojis.getPlatformBadge("http"),
+    get badge() { return emojis.getPlatformBadge("http"); },
     color: 0x2b2d31, // Monochrome Dark Grayscale
     searchPrefix: "http",
     icon: "https://cdn-icons-png.flaticon.com/512/3845/3845868.png",

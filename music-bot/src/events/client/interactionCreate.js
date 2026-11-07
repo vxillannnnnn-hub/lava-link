@@ -1,10 +1,12 @@
 const { handlePlayerButton, handleFilterSelect } = require("../../utils/playerController");
 const { errorText, warnText } = require("../../utils/responses");
+const { runWithClient } = require("../../utils/emojis");
 const logger = require("../../utils/logger");
 
 module.exports = {
   name: "interactionCreate",
   async execute(interaction, client) {
+    return runWithClient(client, async () => {
     // -------------------------------------------------------------------------
     // 1. Slash Command Autocomplete Handling
     // -------------------------------------------------------------------------
@@ -114,5 +116,6 @@ module.exports = {
         }
       }
     }
+    });
   },
 };
