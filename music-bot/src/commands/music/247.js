@@ -17,6 +17,11 @@ module.exports = {
     const newState = !currentState;
     player.set("247", newState);
 
+    if (newState && !player.queue.current && player.voiceChannelId) {
+      const voiceStatusManager = require("../../utils/voiceStatusManager");
+      voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, interaction.guildId);
+    }
+
     return interaction.reply(
       actionText(
         emojis.time,

@@ -55,6 +55,8 @@ module.exports = {
         voiceStatusManager.clearVoiceStatus(client, oldState.channelId, guildId);
         if (player && player.playing && !player.paused && player.queue.current) {
           voiceStatusManager.onTrackStart(client, player, player.queue.current);
+        } else if (player) {
+          voiceStatusManager.setIdleVoiceStatus(client, newState.channelId, guildId);
         }
       }
 
@@ -84,6 +86,10 @@ module.exports = {
           player.set("autoPaused", true);
           logger.info(`Auto-paused playback in guild ${guildId} because voice channel is empty.`);
         }
+
+        // Set cool idle VC status when bot is left alone in voice channel
+        const voiceStatusManager = require("../../utils/voiceStatusManager");
+        voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, guildId);
 
         if (!emptyChannelTimeouts.has(guildId)) {
           logger.info(`Voice channel empty in guild ${guildId}. Starting 2-minute auto-leave timer.`);
@@ -128,6 +134,8 @@ module.exports = {
           await player.resume();
           player.set("autoPaused", false);
           logger.info(`Auto-resumed playback in guild ${guildId} because listener joined.`);
+          const voiceStatusManager = require("../../utils/voiceStatusManager");
+          voiceStatusManager.onResume(client, player);
         }
       }
     });

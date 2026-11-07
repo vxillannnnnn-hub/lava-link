@@ -197,8 +197,8 @@ function initLavalink(client) {
     // Reset dedicated song request channel dashboard to ready state
     updateRequestChannelDashboard(client, player.guildId, null);
 
-    // Clear Voice Channel Status when queue finishes
-    voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
+    // Set cool idle Voice Channel status while bot remains connected in voice
+    voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
     presenceManager.onTrackEnd(client);
 
     // Clean up previous dashboard

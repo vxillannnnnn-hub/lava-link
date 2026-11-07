@@ -15,8 +15,12 @@ const logger = require("./logger");
 const config = require("../config");
 const { formatDuration, truncate } = require("./formatters");
 const { cleanTrackTitle } = require("./sourceManager");
+let db;
+try {
+  db = require("../database/db");
+} catch (_) {}
 
-// Default curated clean templates (Strictly ZERO emojis)
+// Default curated clean templates for playing tracks (Strictly ZERO emojis)
 const DEFAULT_TEMPLATES = [
   "{title} by - {author}",          // Exact user-requested format
   "{title} by {author}",            // Clean classic format
@@ -27,18 +31,63 @@ const DEFAULT_TEMPLATES = [
   "{title} | {author}",             // Modern pipe separator
 ];
 
+// 10 Curated Cool Idle Voice Channel Statuses when nothing is playing or bot is alone in VC (Strictly ZERO emojis)
+const DEFAULT_IDLE_TEMPLATES = [
+  "Use /play to listen to music",
+  "Use {prefix}p or /play to start music",
+  "Chilling in voice • Use /play <song>",
+  "Waiting for tunes • Wake me up with /play",
+  "Ready for music • Send a song with /play",
+  "Vibe with me • Use /play or {prefix}play",
+  "Drop a song with /play or {prefix}p",
+  "Silent right now • Type /play to stream",
+  "Join & use /play to listen together",
+  "24/7 Studio Sound • Type /play or {prefix}p",
+];
+
 // Active interval rotation timers mapped by guildId
 const activeTimers = new Map();
 
 // In-memory cache of current status per voiceChannelId to avoid redundant REST requests
 const channelStatusCache = new Map();
 
-// Current rotating template index by guildId
+// Current rotating template index by guildId (track vs idle)
 const templateIndices = new Map();
+const idleTemplateIndices = new Map();
 
 // Minimum interval between updates to the same channel to safeguard against Discord 429s
 const MIN_UPDATE_COOLDOWN_MS = 5000;
 const lastUpdateTimes = new Map();
+
+/**
+ * Format idle status string with server prefix (No Emojis guaranteed)
+ * @param {string} template 
+ * @param {string} [guildId] 
+ * @returns {string}
+ */
+function formatIdleStatus(template, guildId = null) {
+  let prefix = ".";
+  if (guildId && db?.getGuildPrefix) {
+    try {
+      prefix = db.getGuildPrefix(guildId) || config.discord?.prefix || ".";
+    } catch {
+      prefix = config.discord?.prefix || ".";
+    }
+  } else {
+    prefix = config.discord?.prefix || ".";
+  }
+
+  let status = template.replace(/\{prefix\}/gi, prefix);
+
+  // Strictly strip all Unicode emojis, pictographs and symbols to enforce clean text
+  status = status
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return truncate(status, 100);
+}
 
 /**
  * Format status string using template and track metadata (No Emojis guaranteed)
@@ -219,10 +268,60 @@ function onResume(client, player) {
 }
 
 /**
+ * Set and continuously rotate cool idle Voice Channel statuses when bot is idle or alone in VC
+ * @param {import("discord.js").Client} client 
+ * @param {string} voiceChannelId 
+ * @param {string} guildId 
+ */
+function setIdleVoiceStatus(client, voiceChannelId, guildId) {
+  if (config.voiceStatus?.enabled === false) return;
+  if (!client || !voiceChannelId || !guildId) return;
+
+  // Clear any existing track or idle rotation timer
+  stopRotation(guildId);
+
+  const idleTemplates = config.voiceStatus?.idleTemplates || DEFAULT_IDLE_TEMPLATES;
+  let currentIndex = idleTemplateIndices.get(guildId) ?? Math.floor(Math.random() * idleTemplates.length);
+  idleTemplateIndices.set(guildId, currentIndex);
+
+  const initialStatus = formatIdleStatus(idleTemplates[currentIndex % idleTemplates.length], guildId);
+  setChannelStatus(client, voiceChannelId, initialStatus);
+
+  // Continuous rotation for idle status
+  const rotateInterval = config.voiceStatus?.rotateIntervalMs || 35000;
+  const timer = setInterval(() => {
+    // If bot has started playing a track, cancel idle rotation
+    const activePlayer = client.lavalink?.getPlayer(guildId);
+    if (activePlayer && activePlayer.playing && !activePlayer.paused && activePlayer.queue.current) {
+      stopRotation(guildId);
+      return;
+    }
+
+    // Verify bot is still in this voice channel
+    const currentVCId = activePlayer?.voiceChannelId || client.guilds.cache.get(guildId)?.members.me?.voice.channelId;
+    if (!currentVCId) {
+      stopRotation(guildId);
+      return;
+    }
+
+    currentIndex = (currentIndex + 1) % idleTemplates.length;
+    idleTemplateIndices.set(guildId, currentIndex);
+
+    const rotatedStatus = formatIdleStatus(idleTemplates[currentIndex], guildId);
+    setChannelStatus(client, currentVCId, rotatedStatus);
+  }, rotateInterval);
+
+  activeTimers.set(guildId, timer);
+}
+
+/**
  * Track End Hook
  */
 function onTrackEnd(client, player) {
   stopRotation(player.guildId);
+  if (player.voiceChannelId) {
+    setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
+  }
 }
 
 /**
@@ -234,6 +333,8 @@ function onTrackEnd(client, player) {
 async function clearVoiceStatus(client, voiceChannelId, guildId) {
   if (guildId) {
     stopRotation(guildId);
+    idleTemplateIndices.delete(guildId);
+    templateIndices.delete(guildId);
   }
   if (!voiceChannelId) return;
 
@@ -249,10 +350,14 @@ async function clearVoiceStatus(client, voiceChannelId, guildId) {
 }
 
 module.exports = {
+  DEFAULT_TEMPLATES,
+  DEFAULT_IDLE_TEMPLATES,
   formatStatusString,
+  formatIdleStatus,
   setChannelStatus,
   startRotation,
   stopRotation,
+  setIdleVoiceStatus,
   onTrackStart,
   onPause,
   onResume,

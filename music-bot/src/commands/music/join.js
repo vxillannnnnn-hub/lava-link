@@ -49,6 +49,8 @@ module.exports = {
 
     await player.connect();
     audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
+    const voiceStatusManager = require("../../utils/voiceStatusManager");
+    voiceStatusManager.setIdleVoiceStatus(client, voiceChannel.id, interaction.guildId);
 
     return interaction.reply(
       actionText(emojis.volumeNormal, `Connected to <#${voiceChannel.id}>.`, "Use `/play` to stream audio")

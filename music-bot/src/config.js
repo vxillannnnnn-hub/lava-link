@@ -53,6 +53,18 @@ module.exports = {
       "Listening to {title} - {author}",// Rich presence format
       "{title} | {author}",             // Modern pipe separator
     ],
+    idleTemplates: [
+      "Use /play to listen to music",
+      "Use {prefix}p or /play to start music",
+      "Chilling in voice • Use /play <song>",
+      "Waiting for tunes • Wake me up with /play",
+      "Ready for music • Send a song with /play",
+      "Vibe with me • Use /play or {prefix}play",
+      "Drop a song with /play or {prefix}p",
+      "Silent right now • Type /play to stream",
+      "Join & use /play to listen together",
+      "24/7 Studio Sound • Type /play or {prefix}p",
+    ],
   },
 
   // Strict Monochrome Palette (100% Dark Grayscale)
