@@ -230,30 +230,20 @@ class StateManager {
 
             await player.play({
               clientTrack: builtCurrent,
-              position: session.position || 0,
+              track: { encoded: session.currentTrack.encoded },
+              position: Math.max(0, (session.position || 0) + (ageMs > 0 && !session.paused ? ageMs : 0)),
               paused: session.paused || false,
             });
 
+            logger.info(
+              `[StateManager] Restored playback in "${guild.name}" for "${session.currentTrack.info?.title}" at ${Math.round((session.position || 0) / 1000)}s.`
+            );
             restoredCount++;
           } else if (session.is247) {
             const voiceStatusManager = require("./voiceStatusManager");
             voiceStatusManager.setIdleVoiceStatus(client, session.voiceChannelId, session.guildId);
             restoredCount++;
           }
-
-            await player.play({
-              clientTrack: builtCurrent,
-              track: { encoded: session.currentTrack.encoded },
-              position: Math.max(0, (session.position || 0) + (ageMs > 0 && !session.paused ? ageMs : 0)),
-              paused: session.paused,
-            });
-
-            logger.info(
-              `[StateManager] Restored playback in "${guild.name}" for "${session.currentTrack.info?.title}" at ${Math.round((session.position || 0) / 1000)}s.`
-            );
-          }
-
-          restoredCount++;
         } catch (sessionErr) {
           logger.warn(`[StateManager] Failed to restore session for guild ${session.guildId}:`, sessionErr.message);
         }
