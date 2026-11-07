@@ -856,7 +856,7 @@ async function handlePlayerButton(interaction, client) {
     }
     case "pctrl_filter_bass": {
       if (!checkDJ(false)) return;
-      await player.filterManager.setEqualizer([
+      await player.filterManager.setEQ([
         { band: 0, gain: 0.25 },
         { band: 1, gain: 0.20 },
         { band: 2, gain: 0.15 },
@@ -870,7 +870,7 @@ async function handlePlayerButton(interaction, client) {
     }
     case "pctrl_filter_nightcore": {
       if (!checkDJ(false)) return;
-      await player.filterManager.setTimescale({ speed: 1.25, pitch: 1.25, rate: 1.0 });
+      await player.filterManager.toggleNightcore();
       return interaction.reply({
         content: `${emojis.filters.nightcore} **Nightcore** preset applied.`,
         flags: MessageFlags.Ephemeral,
@@ -879,7 +879,7 @@ async function handlePlayerButton(interaction, client) {
     }
     case "pctrl_filter_8d": {
       if (!checkDJ(false)) return;
-      await player.filterManager.setRotation({ rotationHz: 0.2 });
+      await player.filterManager.toggleRotation();
       return interaction.reply({
         content: `${emojis.filters.spatial8D} **8D Surround** preset applied.`,
         flags: MessageFlags.Ephemeral,
@@ -944,7 +944,7 @@ async function handleFilterSelect(interaction, client) {
       break;
     case "bass":
       await player.filterManager.resetFilters();
-      await player.filterManager.setEqualizer([{ band: 0, gain: 0.25 }, { band: 1, gain: 0.20 }, { band: 2, gain: 0.15 }]);
+      await player.filterManager.setEQ([{ band: 0, gain: 0.25 }, { band: 1, gain: 0.20 }, { band: 2, gain: 0.15 }]);
       player.set("activeFilter", "Bass Boost");
       filterName = "Bass Boost";
       break;

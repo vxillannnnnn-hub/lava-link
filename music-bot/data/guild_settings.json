@@ -1,0 +1,22 @@
+{
+  "123": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "updated_at": 1794036672279
+  },
+  "test_guild_999": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "updated_at": 1794036770057
+  }
+}

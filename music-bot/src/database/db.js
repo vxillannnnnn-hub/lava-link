@@ -1,8 +1,9 @@
 /**
- * Enterprise SQLite Database Layer (Powered by better-sqlite3)
- * High-performance, synchronous WAL-mode persistence for:
- * - Guild configurations (Dedicated song-request channels, DJ role settings)
+ * Enterprise SQLite & JSON Dual-Persistence Database Layer (Powered by better-sqlite3)
+ * High-performance, synchronous WAL-mode persistence backed by auto-syncing JSON text mirrors:
+ * - Guild configurations (Dedicated song-request channels, DJ role settings, prefix routing)
  * - User cloud playlists & saved favorites
+ * - Auto-recovers from Git text snapshots across any GitHub Actions restart or cancellation
  */
 
 const Database = require("better-sqlite3");
@@ -17,6 +18,10 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const dbPath = path.join(dataDir, "bot.db");
+const GUILD_SETTINGS_FILE = path.join(dataDir, "guild_settings.json");
+const USER_PLAYLISTS_FILE = path.join(dataDir, "user_playlists.json");
+const USER_FAVORITES_FILE = path.join(dataDir, "user_favorites.json");
+
 logger.info("[Database] Initializing SQLite database at:", dbPath);
 
 let db;
@@ -105,8 +110,24 @@ const prefixCache = new Map();
 
 // Prepared Statements
 const stmts = {
+  getAllGuilds: db.prepare("SELECT * FROM guild_settings"),
   getGuild: db.prepare("SELECT * FROM guild_settings WHERE guild_id = ?"),
   getPrefix: db.prepare("SELECT prefix FROM guild_settings WHERE guild_id = ?"),
+  upsertGuild: db.prepare(`
+    INSERT INTO guild_settings (
+      guild_id, prefix, request_channel_id, request_message_id,
+      dj_role_id, dj_enabled, auto_pause_enabled, stage_auto_speaker, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      prefix = coalesce(excluded.prefix, guild_settings.prefix),
+      request_channel_id = coalesce(excluded.request_channel_id, guild_settings.request_channel_id),
+      request_message_id = coalesce(excluded.request_message_id, guild_settings.request_message_id),
+      dj_role_id = coalesce(excluded.dj_role_id, guild_settings.dj_role_id),
+      dj_enabled = excluded.dj_enabled,
+      auto_pause_enabled = excluded.auto_pause_enabled,
+      stage_auto_speaker = excluded.stage_auto_speaker,
+      updated_at = excluded.updated_at
+  `),
   setPrefix: db.prepare(`
     INSERT INTO guild_settings (guild_id, prefix, updated_at)
     VALUES (?, ?, ?)
@@ -135,6 +156,13 @@ const stmts = {
       dj_enabled = excluded.dj_enabled,
       updated_at = excluded.updated_at
   `),
+  getAllPlaylistsWithTracks: db.prepare(`
+    SELECT p.id as playlist_id, p.user_id, p.name, p.created_at,
+           t.id as track_id, t.title, t.author, t.uri, t.duration, t.artwork_url, t.source_name, t.added_at
+    FROM user_playlists p
+    LEFT JOIN playlist_tracks t ON p.id = t.playlist_id
+    ORDER BY p.user_id, p.id, t.id
+  `),
   createPlaylist: db.prepare("INSERT INTO user_playlists (user_id, name, created_at) VALUES (?, ?, ?)"),
   getUserPlaylists: db.prepare(`
     SELECT p.*, COUNT(t.id) as track_count
@@ -152,6 +180,7 @@ const stmts = {
   `),
   getPlaylistTracks: db.prepare("SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY id ASC"),
   removeTrackFromPlaylist: db.prepare("DELETE FROM playlist_tracks WHERE playlist_id = ? AND id = ?"),
+  getAllFavorites: db.prepare("SELECT * FROM user_favorites ORDER BY user_id, saved_at DESC"),
   addFavorite: db.prepare(`
     INSERT INTO user_favorites (user_id, uri, title, author, duration, artwork_url, source_name, saved_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -164,6 +193,219 @@ const stmts = {
   getFavorites: db.prepare("SELECT * FROM user_favorites WHERE user_id = ? ORDER BY saved_at DESC LIMIT 100"),
   removeFavorite: db.prepare("DELETE FROM user_favorites WHERE user_id = ? AND uri = ?"),
 };
+
+/**
+ * Atomic file writer: writes to a temporary file then renames, preventing truncated reads.
+ */
+function atomicWriteJson(filePath, data) {
+  try {
+    const tmpPath = `${filePath}.tmp.${Date.now()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  }
+}
+
+// Global dirty flag hookable by StateManager for git pushes
+let onStateChangeHook = null;
+
+function notifyChange() {
+  if (typeof onStateChangeHook === "function") {
+    try {
+      onStateChangeHook();
+    } catch (_) {}
+  }
+}
+
+/**
+ * Checkpoint WAL to main database file (transfers all writes from bot.db-wal to bot.db)
+ */
+function checkpoint() {
+  try {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    return true;
+  } catch (err) {
+    logger.error("[Database] Failed to checkpoint WAL:", err.message);
+    return false;
+  }
+}
+
+/**
+ * Export current SQLite data to clean JSON text mirror files.
+ * This guarantees Git can diff and track all settings without binary merge conflicts.
+ */
+function exportJson() {
+  try {
+    // 1. Export Guild Settings
+    const guilds = stmts.getAllGuilds.all();
+    const guildMap = {};
+    for (const g of guilds) {
+      guildMap[g.guild_id] = {
+        prefix: g.prefix || ".",
+        request_channel_id: g.request_channel_id || null,
+        request_message_id: g.request_message_id || null,
+        dj_role_id: g.dj_role_id || null,
+        dj_enabled: Boolean(g.dj_enabled),
+        auto_pause_enabled: g.auto_pause_enabled !== 0,
+        stage_auto_speaker: g.stage_auto_speaker !== 0,
+        updated_at: g.updated_at || Date.now(),
+      };
+    }
+    atomicWriteJson(GUILD_SETTINGS_FILE, guildMap);
+
+    // 2. Export User Playlists with Tracks
+    const rawPlaylists = stmts.getAllPlaylistsWithTracks.all();
+    const playlistMap = new Map();
+    for (const row of rawPlaylists) {
+      if (!playlistMap.has(row.playlist_id)) {
+        playlistMap.set(row.playlist_id, {
+          user_id: row.user_id,
+          name: row.name,
+          created_at: row.created_at,
+          tracks: [],
+        });
+      }
+      if (row.track_id) {
+        playlistMap.get(row.playlist_id).tracks.push({
+          title: row.title,
+          author: row.author,
+          uri: row.uri,
+          duration: row.duration,
+          artwork_url: row.artwork_url,
+          source_name: row.source_name,
+          added_at: row.added_at,
+        });
+      }
+    }
+    atomicWriteJson(USER_PLAYLISTS_FILE, Array.from(playlistMap.values()));
+
+    // 3. Export User Favorites
+    const favorites = stmts.getAllFavorites.all();
+    atomicWriteJson(USER_FAVORITES_FILE, favorites);
+
+    return true;
+  } catch (err) {
+    logger.error("[Database] Failed to export JSON mirror:", err.message);
+    return false;
+  }
+}
+
+/**
+ * Two-way Self-Healing Synchronization on Startup:
+ * Reads existing JSON mirror files and auto-populates SQLite if fresh or missing records.
+ * Then immediately checkpoints WAL to disk and updates JSON.
+ */
+function syncDualStorage() {
+  logger.info("[Database] 🔄 Checking dual JSON/SQLite storage synchronization...");
+  let importedCount = 0;
+
+  // 1. Synchronize Guild Settings
+  if (fs.existsSync(GUILD_SETTINGS_FILE)) {
+    try {
+      const raw = fs.readFileSync(GUILD_SETTINGS_FILE, "utf8");
+      const jsonGuilds = JSON.parse(raw);
+      if (jsonGuilds && typeof jsonGuilds === "object") {
+        for (const [guildId, data] of Object.entries(jsonGuilds)) {
+          const existing = stmts.getGuild.get(guildId);
+          // If not in SQLite or JSON has newer/equal updated_at, upsert into SQLite
+          if (!existing || (data.updated_at || 0) >= (existing.updated_at || 0)) {
+            stmts.upsertGuild.run(
+              guildId,
+              data.prefix || ".",
+              data.request_channel_id || null,
+              data.request_message_id || null,
+              data.dj_role_id || null,
+              data.dj_enabled ? 1 : 0,
+              data.auto_pause_enabled === false ? 0 : 1,
+              data.stage_auto_speaker === false ? 0 : 1,
+              data.updated_at || Date.now()
+            );
+            prefixCache.set(guildId, data.prefix || ".");
+            importedCount++;
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("[Database] Could not import guild_settings.json:", err.message);
+    }
+  }
+
+  // 2. Synchronize User Playlists
+  if (fs.existsSync(USER_PLAYLISTS_FILE)) {
+    try {
+      const raw = fs.readFileSync(USER_PLAYLISTS_FILE, "utf8");
+      const jsonPlaylists = JSON.parse(raw);
+      if (Array.isArray(jsonPlaylists)) {
+        for (const pl of jsonPlaylists) {
+          if (!pl.user_id || !pl.name) continue;
+          let existing = stmts.getPlaylistByName.get(pl.user_id, pl.name);
+          let playlistId = existing?.id;
+          if (!existing) {
+            const res = stmts.createPlaylist.run(pl.user_id, pl.name, pl.created_at || Date.now());
+            playlistId = res.lastInsertRowid;
+          }
+          if (Array.isArray(pl.tracks) && playlistId) {
+            const existingTracks = stmts.getPlaylistTracks.all(playlistId);
+            const existingUris = new Set(existingTracks.map((t) => t.uri));
+            for (const t of pl.tracks) {
+              if (!existingUris.has(t.uri)) {
+                stmts.addTrackToPlaylist.run(
+                  playlistId,
+                  t.title || "Unknown Title",
+                  t.author || "",
+                  t.uri || "",
+                  t.duration || 0,
+                  t.artwork_url || "",
+                  t.source_name || "audio",
+                  t.added_at || Date.now()
+                );
+                existingUris.add(t.uri);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("[Database] Could not import user_playlists.json:", err.message);
+    }
+  }
+
+  // 3. Synchronize User Favorites
+  if (fs.existsSync(USER_FAVORITES_FILE)) {
+    try {
+      const raw = fs.readFileSync(USER_FAVORITES_FILE, "utf8");
+      const jsonFavorites = JSON.parse(raw);
+      if (Array.isArray(jsonFavorites)) {
+        for (const fav of jsonFavorites) {
+          if (fav.user_id && fav.uri && fav.title) {
+            stmts.addFavorite.run(
+              fav.user_id,
+              fav.uri,
+              fav.title,
+              fav.author || "",
+              fav.duration || 0,
+              fav.artwork_url || "",
+              fav.source_name || "audio",
+              fav.saved_at || Date.now()
+            );
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("[Database] Could not import user_favorites.json:", err.message);
+    }
+  }
+
+  // Immediate WAL Checkpoint and Export JSON to guarantee sync
+  checkpoint();
+  exportJson();
+
+  logger.info(`[Database] ✅ Storage sync complete. Active guild records: ${stmts.getAllGuilds.all().length} (${importedCount} imported/refreshed)`);
+}
+
+// Run synchronization immediately upon module load
+syncDualStorage();
 
 module.exports = {
   db,
@@ -182,7 +424,11 @@ module.exports = {
     if (!guildId) return;
     const cleanPrefix = (newPrefix || ".").trim();
     prefixCache.set(guildId, cleanPrefix);
-    return stmts.setPrefix.run(guildId, cleanPrefix, Date.now());
+    const res = stmts.setPrefix.run(guildId, cleanPrefix, Date.now());
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   getGuildSettings(guildId) {
@@ -190,21 +436,36 @@ module.exports = {
   },
 
   setRequestChannel(guildId, channelId, messageId) {
-    return stmts.upsertRequestChannel.run(guildId, channelId, messageId, Date.now());
+    const res = stmts.upsertRequestChannel.run(guildId, channelId, messageId, Date.now());
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   clearRequestChannel(guildId) {
-    return stmts.clearRequestChannel.run(guildId);
+    const res = stmts.clearRequestChannel.run(guildId);
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   setDjSettings(guildId, roleId, enabled) {
-    return stmts.upsertDjSettings.run(guildId, roleId, enabled ? 1 : 0, Date.now());
+    const res = stmts.upsertDjSettings.run(guildId, roleId, enabled ? 1 : 0, Date.now());
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   // Playlists
   createPlaylist(userId, name) {
     try {
       const res = stmts.createPlaylist.run(userId, name.trim(), Date.now());
+      checkpoint();
+      exportJson();
+      notifyChange();
       return { id: res.lastInsertRowid, name: name.trim() };
     } catch (err) {
       if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
@@ -223,11 +484,15 @@ module.exports = {
   },
 
   deletePlaylist(playlistId) {
-    return stmts.deletePlaylist.run(playlistId);
+    const res = stmts.deletePlaylist.run(playlistId);
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   addTrackToPlaylist(playlistId, track) {
-    return stmts.addTrackToPlaylist.run(
+    const res = stmts.addTrackToPlaylist.run(
       playlistId,
       track.info.title,
       track.info.author || "",
@@ -237,15 +502,27 @@ module.exports = {
       track.info.sourceName || "audio",
       Date.now()
     );
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   getPlaylistTracks(playlistId) {
     return stmts.getPlaylistTracks.all(playlistId);
   },
 
+  removeTrackFromPlaylist(playlistId, id) {
+    const res = stmts.removeTrackFromPlaylist.run(playlistId, id);
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
+  },
+
   // Favorites
   addFavorite(userId, track) {
-    return stmts.addFavorite.run(
+    const res = stmts.addFavorite.run(
       userId,
       track.info.uri || track.info.identifier,
       track.info.title,
@@ -255,6 +532,10 @@ module.exports = {
       track.info.sourceName || "audio",
       Date.now()
     );
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   getFavorites(userId) {
@@ -262,21 +543,33 @@ module.exports = {
   },
 
   removeFavorite(userId, uri) {
-    return stmts.removeFavorite.run(userId, uri);
+    const res = stmts.removeFavorite.run(userId, uri);
+    checkpoint();
+    exportJson();
+    notifyChange();
+    return res;
   },
 
   /**
    * Checkpoint WAL to main database file (transfers all writes from bot.db-wal to bot.db)
    */
-  checkpoint() {
-    try {
-      db.pragma("wal_checkpoint(TRUNCATE)");
-      logger.debug("[Database] WAL checkpointed to disk successfully.");
-      return true;
-    } catch (err) {
-      logger.error("[Database] Failed to checkpoint WAL:", err.message);
-      return false;
-    }
+  checkpoint,
+
+  /**
+   * Export SQLite to JSON mirror files
+   */
+  exportJson,
+
+  /**
+   * Two-way sync
+   */
+  syncDualStorage,
+
+  /**
+   * Register a hook for state mutations (used by periodic Git sync engine)
+   */
+  setOnStateChangeHook(fn) {
+    onStateChangeHook = fn;
   },
 
   /**

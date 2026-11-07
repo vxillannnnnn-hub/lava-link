@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 const logger = require("./logger");
 const db = require("../database/db");
 
@@ -7,19 +8,33 @@ const DATA_DIR = path.join(__dirname, "..", "..", "data");
 const STATE_FILE = path.join(DATA_DIR, "active_sessions.json");
 
 /**
- * State & Backup Manager
- * - Handles WAL database checkpointing
+ * Enterprise State & Backup Manager
+ * - Synchronous WAL database checkpointing
+ * - Dual-layer JSON text persistence & mirror synchronization
  * - Captures in-memory active players and queues to active_sessions.json
+ * - Periodic & exit git commits to ensure zero data loss in CI/CD environments
  * - Restores voice connections and playback positions across GitHub Actions runner restarts
  */
 class StateManager {
   constructor() {
     this.intervalId = null;
+    this.gitSyncIntervalId = null;
     this.isRestoring = false;
+    this.isDirty = false;
+    this.isGitSyncing = false;
+
+    // Connect hook to db.js so any database write marks state as dirty
+    if (typeof db.setOnStateChangeHook === "function") {
+      db.setOnStateChangeHook(() => this.markDirty());
+    }
+  }
+
+  markDirty() {
+    this.isDirty = true;
   }
 
   /**
-   * Save current active player sessions and queues to disk
+   * Save current active player sessions and queues to disk & ensure WAL is checkpointed
    * @param {import("discord.js").Client} client 
    */
   saveState(client) {
@@ -30,6 +45,7 @@ class StateManager {
 
       // Checkpoint SQLite WAL first so bot.db is completely up-to-date
       db.checkpoint();
+      db.exportJson();
 
       if (!client?.lavalink?.players) {
         return 0;
@@ -85,6 +101,32 @@ class StateManager {
     } catch (err) {
       logger.error("[StateManager] Failed to save state:", err.message);
       return 0;
+    }
+  }
+
+  /**
+   * Safe synchronous Git auto-sync used on exit / periodic runner sync
+   */
+  syncToGitSync() {
+    if (process.env.GITHUB_ACTIONS !== "true") return;
+    try {
+      logger.info("[StateManager] 🚀 Syncing persistent database state to repository...");
+      db.checkpoint();
+      db.exportJson();
+
+      const branch = process.env.GITHUB_REF_NAME || "main";
+      const gitCmd = [
+        'git config user.name "github-actions[bot]"',
+        'git config user.email "github-actions[bot]@users.noreply.github.com"',
+        "git add -f music-bot/data/guild_settings.json music-bot/data/user_playlists.json music-bot/data/user_favorites.json music-bot/data/active_sessions.json music-bot/data/bot.db 2>/dev/null",
+        'git diff --staged --quiet || (git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" && git pull --rebase origin ' + branch + ' -X ours && git push origin ' + branch + ")",
+      ].join(" && ");
+
+      execSync(gitCmd, { stdio: "pipe", timeout: 45000, shell: "/bin/bash" });
+      logger.success("[StateManager] ✅ Persistent database state successfully synced to Git repository.");
+      this.isDirty = false;
+    } catch (err) {
+      logger.warn("[StateManager] Git sync notice:", err?.message || err);
     }
   }
 
@@ -213,19 +255,37 @@ class StateManager {
   }
 
   /**
-   * Initialize auto-saving every 60 seconds and graceful shutdown handlers
+   * Initialize auto-saving every 60 seconds, periodic git backup, and graceful shutdown handlers
    * @param {import("discord.js").Client} client 
    */
   initGracefulPersistence(client) {
+    if (this.intervalId) return;
+
     // 1. Recurring 60-second snapshot
     this.intervalId = setInterval(() => {
       this.saveState(client);
     }, 60000);
 
-    // 2. Process exit handlers (SIGTERM / SIGINT)
+    // 2. Periodic 3-minute Git sync if dirty in GitHub Actions
+    if (process.env.GITHUB_ACTIONS === "true") {
+      this.gitSyncIntervalId = setInterval(() => {
+        if (this.isDirty && !this.isGitSyncing) {
+          this.isGitSyncing = true;
+          try {
+            this.syncToGitSync();
+          } finally {
+            this.isGitSyncing = false;
+          }
+        }
+      }, 180000);
+      this.gitSyncIntervalId.unref();
+    }
+
+    // 3. Process exit handlers (SIGTERM / SIGINT)
     const onExit = (signal) => {
-      logger.info(`[StateManager] Received ${signal}. Executing final database checkpoint & state snapshot...`);
+      logger.info(`[StateManager] Received ${signal}. Executing final database checkpoint, state snapshot & sync...`);
       this.saveState(client);
+      this.syncToGitSync();
       process.exit(0);
     };
 

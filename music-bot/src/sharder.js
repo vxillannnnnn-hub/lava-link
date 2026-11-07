@@ -103,6 +103,7 @@ if (tokens.length > 1) {
     try {
       if (clients[0]) {
         stateManager.saveState(clients[0]);
+        stateManager.syncToGitSync();
       }
       for (const client of clients) {
         for (const [, player] of client.lavalink?.players || []) {

@@ -53,7 +53,7 @@ module.exports = {
 
       case "normalizer":
         await player.filterManager.resetFilters();
-        await player.filterManager.setEqualizer([
+        await player.filterManager.setEQ([
           { band: 0, gain: 0.05 },
           { band: 1, gain: 0.05 },
           { band: 2, gain: 0.00 },

@@ -1,0 +1,7 @@
+# Treat SQLite databases strictly as binary to prevent 3-way merge corruptions
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Ensure JSON files use standard line endings
+*.json text eol=lf

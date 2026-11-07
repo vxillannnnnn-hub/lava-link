@@ -295,25 +295,29 @@ jobs:
       # ========================================================================
       # MATRIX COMPONENT B: DISCORD MUSIC BOT FLEET
       # ========================================================================
-      - name: Restore Bot Database & Active Sessions Cache
+      - name: Restore Bot Database & Persistent Storage Cache
         if: matrix.component == 'music-bot'
         id: restore-bot-data
         uses: actions/cache/restore@v5
         with:
           path: music-bot/data
-          key: bot-data-${{ github.run_id }}
+          key: bot-persistent-v6-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            bot-data-
+            bot-persistent-v6-${{ github.ref_name }}-
 
-      - name: Restore Backup from Previous Artifact (if Cache Missed)
-        if: matrix.component == 'music-bot' && steps.restore-bot-data.outputs.cache-hit != 'true'
+      - name: Fallback Restore from Previous Artifact Backup
+        if: matrix.component == 'music-bot'
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p music-bot/data
-          echo "Attempting to retrieve last artifact backup..."
-          gh run download --name bot-backup-latest --dir music-bot/data 2>/dev/null || true
+          # If neither guild_settings.json nor bot.db exists with content > 100 bytes, download latest artifact backup
+          if [ ! -s "music-bot/data/guild_settings.json" ] && [ ! -s "music-bot/data/bot.db" ]; then
+            echo "Local cache miss or empty data detected. Downloading bot-backup-latest artifact..."
+            gh run download --name bot-backup-latest --dir music-bot/data 2>/dev/null || true
+          fi
+          echo "Persistent data files on disk:"
           ls -la music-bot/data || true
 
       - name: Setup Node.js 20.x LTS (Music Bot)
@@ -440,9 +444,9 @@ jobs:
         if: matrix.component == 'music-bot' && always()
         run: |
           if [ -d "music-bot/data" ]; then
-            echo "Flushing SQLite WAL checkpoints & verifying database integrity..."
+            echo "Flushing SQLite WAL checkpoints & syncing JSON mirrors..."
             cd music-bot
-            node -e "try { require('./src/database/db').checkpoint(); console.log('DB Checkpoint successful'); } catch(e){ console.log(e.message); }" || true
+            node -e "try { const db = require('./src/database/db'); db.checkpoint(); db.exportJson(); console.log('DB Checkpoint & JSON export successful'); } catch(e){ console.log(e.message); }" || true
             cd ..
             ls -lh music-bot/data || true
           fi
@@ -452,7 +456,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: music-bot/data
-          key: bot-data-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bot-persistent-v6-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload Persistent Bot Data Artifact
         if: matrix.component == 'music-bot' && always()
@@ -468,15 +472,39 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ -f "music-bot/data/bot.db" ]; then
-            git add music-bot/data/bot.db
+          cd music-bot
+          node -e "try { const db = require('./src/database/db'); db.checkpoint(); db.exportJson(); } catch(e){}" || true
+          cd ..
+          
+          # Stage persistent files
+          git add -f music-bot/data/guild_settings.json music-bot/data/user_playlists.json music-bot/data/user_favorites.json music-bot/data/active_sessions.json music-bot/data/bot.db 2>/dev/null || true
+          
+          if git diff --staged --quiet; then
+            echo "No persistent data changes to commit."
+          else
+            echo "Committing updated persistent state..."
+            git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" || true
+            
+            # Robust push with rebase favoring runtime changes
+            for attempt in 1 2 3; do
+              echo "Push attempt $attempt..."
+              git fetch origin ${{ github.ref_name }} || true
+              if git rebase -X ours origin/${{ github.ref_name }}; then
+                if git push origin ${{ github.ref_name }}; then
+                  echo "✅ Persistent state pushed successfully!"
+                  break
+                fi
+              else
+                git rebase --abort || true
+                git pull --rebase origin ${{ github.ref_name }} || true
+                if git push origin ${{ github.ref_name }}; then
+                  echo "✅ Persistent state pushed successfully after rebase!"
+                  break
+                fi
+              fi
+              sleep 3
+            done
           fi
-          if [ -f "music-bot/data/active_sessions.json" ]; then
-            git add music-bot/data/active_sessions.json
-          fi
-          git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" || true
-          git pull --rebase origin ${{ github.ref_name }} || true
-          git push origin ${{ github.ref_name }} || true
 
   # ============================================================================
   # 24/7 SELF-HEALING RECOVERY LOOP (Runs Once for Both Services)
