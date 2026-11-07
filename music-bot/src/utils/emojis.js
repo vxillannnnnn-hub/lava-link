@@ -11,116 +11,154 @@
  * directly into your Discord server for a crisp, professional Eara-style look.
  */
 
+const UNICODE_FALLBACKS = {
+  play: "▶",
+  pause: "⏸",
+  playpause: "⏯",
+  previous: "⏮",
+  skip: "⏭",
+  stop: "⏹",
+  loop: "↻",
+  loopOne: "↺",
+  shuffle: "⤨",
+  autoplay: "∞",
+  heart: "♡",
+  queue: "☰",
+  volume: "🔊",
+  volumeNormal: "🔊",
+  volumelow: "🔉",
+  volumeLow: "🔉",
+  volumemute: "🔇",
+  volumeMute: "🔇",
+  volumeBoost: "🔊",
+  sparkles: "✦",
+  music: "♫",
+  disc: "◎",
+  radio: "◉",
+  dj: "◈",
+  fire: "▲",
+  check: "✓",
+  success: "✓",
+  cross: "✕",
+  error: "✕",
+  warn: "✕",
+  spotify: "♫",
+  youtube: "▶",
+  soundcloud: "☁",
+  openPlayer: "⏏",
+  pointer: "›",
+};
+
 const EMOJI_CONFIG = {
   // ---------------------------------------------------------------------------
   // 1. PLAYER TRANSPORT CONTROLS (Monochrome White Static Guild Emojis)
   // ---------------------------------------------------------------------------
-  play: "<:p_play:1568622109146615811>",
-  pause: "<:p_pause:1568622118898372610>",
-  playpause: "<:p_playpause:1568622129212039178>",
-  previous: "<:p_previous:1568622151290982531>",
-  skip: "<:p_skip:1568622140767346770>",
-  stop: "<:p_stop:1568622161751572501>",
-  loop: "<:p_loop:1568622172883263508>",
-  loopOne: "<:p_loop_one:1568622183922667662>",
-  shuffle: "<:p_shuffle:1568622196367163392>",
-  autoplay: "<:p_autoplay:1568622207150723194>",
-  save: "<:p_heart:1568622217753919560>",
-  heart: "<:p_heart:1568622217753919560>",
+  play: "<:play:1568636872971001916>",
+  pause: "<:pause:1568636879945859094>",
+  playpause: "<:playpause:1568636887374106634>",
+  previous: "<:previous:1568636898631614595>",
+  skip: "<:skip:1568636894567203016>",
+  stop: "<:stop:1568636906634346611>",
+  loop: "<:loop:1568636915270426737>",
+  loopOne: "<:loop_one:1568636919498416188>",
+  shuffle: "<:shuffle:1568636923684323419>",
+  autoplay: "<:autoplay:1568636927987421194>",
+  save: "<:heart:1568636935508066304>",
+  heart: "<:heart:1568636935508066304>",
   openPlayer: "⏏",
-  queue: "<:p_queue:1568622228541673572>",
+  queue: "<:queue:1568636942785056779>",
 
   // ---------------------------------------------------------------------------
   // 2. VOLUME CONTROLS & AUDIO LEVELS
   // ---------------------------------------------------------------------------
-  volume: "<:p_volume:1568622239253790873>",
-  volumeNormal: "<:p_volume:1568622239253790873>",
-  volumeLow: "<:p_volumelow:1568622250347991041>",
-  volumeMute: "<:p_volumemute:1568622261282545776>",
-  volumeBoost: "<:p_volume:1568622239253790873>",
+  volume: "<:volume:1568636950146056282>",
+  volumeNormal: "<:volume:1568636950146056282>",
+  volumeLow: "<:volumelow:1568636954646421666>",
+  volumeMute: "<:volumemute:1568636958744379606>",
+  volumeBoost: "<:volume:1568636950146056282>",
 
   // ---------------------------------------------------------------------------
   // 3. SYSTEM STATUS, ALERTS & BADGES (100% Monochrome White Vector Emojis)
   // ---------------------------------------------------------------------------
-  success: "<:p_check:1568622344853790860>",
-  check: "<:p_check:1568622344853790860>",
-  error: "<:p_cross:1568622356170145883>",
-  cross: "<:p_cross:1568622356170145883>",
-  warn: "<:p_cross:1568622356170145883>",
-  alert: "<:p_cross:1568622356170145883>",
-  info: "<:p_music:1568622286066688281>",
-  sparkles: "<:p_sparkles:1568622274339151945>",
-  fire: "<:p_fire:1568622332535242923>",
-  pin: "<:p_sparkles:1568622274339151945>",
-  live: "<:p_radio:1568622309139554354>",
-  online: "<:p_check:1568622344853790860>",
-  offline: "<:p_cross:1568622356170145883>",
+  success: "<:check:1568637021130465461>",
+  check: "<:check:1568637021130465461>",
+  error: "<:cross:1568637028852170958>",
+  cross: "<:cross:1568637028852170958>",
+  warn: "<:cross:1568637028852170958>",
+  alert: "<:cross:1568637028852170958>",
+  info: "<:music:1568636978508075189>",
+  sparkles: "<:sparkles:1568636966386278594>",
+  fire: "<:fire:1568637013916262430>",
+  pin: "<:sparkles:1568636966386278594>",
+  live: "<:radio:1568636998330089592>",
+  online: "<:check:1568637021130465461>",
+  offline: "<:cross:1568637028852170958>",
 
   // ---------------------------------------------------------------------------
   // 4. MUSIC FEATURES & UTILITY CONTROLS (100% Monochrome White Vector Emojis)
   // ---------------------------------------------------------------------------
-  music: "<:p_music:1568622286066688281>",
-  disc: "<:p_disc:1568622296204189759>",
-  radio: "<:p_radio:1568622309139554354>",
-  dj: "<:p_dj:1568622319746687017>",
-  playlist: "<:p_queue:1568622228541673572>",
-  lyrics: "<:p_music:1568622286066688281>",
-  scroll: "<:p_queue:1568622228541673572>",
-  search: "<:p_music:1568622286066688281>",
-  equalizer: "<:p_volume:1568622239253790873>",
-  time: "<:p_disc:1568622296204189759>",
-  user: "<:p_dj:1568622319746687017>",
-  link: "<:p_music:1568622286066688281>",
-  stats: "<:p_volume:1568622239253790873>",
-  ping: "<:p_radio:1568622309139554354>",
-  clear: "<:p_stop:1568622161751572501>",
-  reset: "<:p_loop:1568622172883263508>",
-  settings: "<:p_dj:1568622319746687017>",
-  gear: "<:p_dj:1568622319746687017>",
-  help: "<:p_sparkles:1568622274339151945>",
+  music: "<:music:1568636978508075189>",
+  disc: "<:disc:1568636991225077770>",
+  radio: "<:radio:1568636998330089592>",
+  dj: "<:dj:1568637006114983986>",
+  playlist: "<:queue:1568636942785056779>",
+  lyrics: "<:music:1568636978508075189>",
+  scroll: "<:queue:1568636942785056779>",
+  search: "<:music:1568636978508075189>",
+  equalizer: "<:volume:1568636950146056282>",
+  time: "<:disc:1568636991225077770>",
+  user: "<:dj:1568637006114983986>",
+  link: "<:music:1568636978508075189>",
+  stats: "<:volume:1568636950146056282>",
+  ping: "<:radio:1568636998330089592>",
+  clear: "<:stop:1568636906634346611>",
+  reset: "<:loop:1568636915270426737>",
+  settings: "<:dj:1568637006114983986>",
+  gear: "<:dj:1568637006114983986>",
+  help: "<:sparkles:1568636966386278594>",
   pointer: "›",
-  book: "<:p_queue:1568622228541673572>",
-  leave: "<:p_stop:1568622161751572501>",
-  wave: "<:p_stop:1568622161751572501>",
-  vote: "<:p_check:1568622344853790860>",
-  mic: "<:p_music:1568622286066688281>",
-  guitar: "<:p_music:1568622286066688281>",
-  audio: "<:p_volume:1568622239253790873>",
+  book: "<:queue:1568636942785056779>",
+  leave: "<:stop:1568636906634346611>",
+  wave: "<:stop:1568636906634346611>",
+  vote: "<:check:1568637021130465461>",
+  mic: "<:music:1568636978508075189>",
+  guitar: "<:music:1568636978508075189>",
+  audio: "<:volume:1568636950146056282>",
 
   // ---------------------------------------------------------------------------
   // 5. STREAMING PLATFORMS (Monochrome White Branding)
   // ---------------------------------------------------------------------------
-  spotify: "<:p_spotify:1568622368295747694>",
-  youtube: "<:p_youtube:1568622379339354313>",
-  soundcloud: "<:p_soundcloud:1568622390131298414>",
-  jiosaavn: "<:p_music:1568622286066688281>",
-  bandcamp: "<:p_disc:1568622296204189759>",
-  twitch: "<:p_radio:1568622309139554354>",
-  web: "<:p_disc:1568622296204189759>",
+  spotify: "<:spotify:1568637036620030132>",
+  youtube: "<:youtube:1568637043930828914>",
+  soundcloud: "<:soundcloud:1568637051497091082>",
+  jiosaavn: "<:music:1568636978508075189>",
+  bandcamp: "<:disc:1568636991225077770>",
+  twitch: "<:radio:1568636998330089592>",
+  web: "<:disc:1568636991225077770>",
 
   // ---------------------------------------------------------------------------
   // 6. DSP AUDIO FILTERS
   // ---------------------------------------------------------------------------
-  filter8D: "<:p_dj:1568622319746687017>",
-  filterBass: "<:p_volume:1568622239253790873>",
-  filterNightcore: "<:p_sparkles:1568622274339151945>",
-  filterVaporwave: "<:p_disc:1568622296204189759>",
-  filterKaraoke: "<:p_music:1568622286066688281>",
-  filterPop: "<:p_music:1568622286066688281>",
-  filterRock: "<:p_music:1568622286066688281>",
-  filterNormalizer: "<:p_disc:1568622296204189759>",
-  filterReset: "<:p_loop:1568622172883263508>",
+  filter8D: "<:dj:1568637006114983986>",
+  filterBass: "<:volume:1568636950146056282>",
+  filterNightcore: "<:sparkles:1568636966386278594>",
+  filterVaporwave: "<:disc:1568636991225077770>",
+  filterKaraoke: "<:music:1568636978508075189>",
+  filterPop: "<:music:1568636978508075189>",
+  filterRock: "<:music:1568636978508075189>",
+  filterNormalizer: "<:disc:1568636991225077770>",
+  filterReset: "<:loop:1568636915270426737>",
 
   // ---------------------------------------------------------------------------
   // 7. SEAMLESS PROGRESS BAR BLOCKS
   // ---------------------------------------------------------------------------
-  bar_lf: "<:p_bar_lf:1568622402752086026>",
-  bar_mf: "<:p_bar_mf:1568622415146127530>",
-  bar_rf: "<:p_bar_rf:1568622425145475084>",
-  bar_le: "<:p_bar_le:1568622436230897744>",
-  bar_me: "<:p_bar_me:1568622446381240421>",
-  bar_re: "<:p_bar_re:1568622457470849024>",
-  bar_single_f: "<:p_bar_single_f:1568622469194063932>",
+  bar_lf: "<:bar_lf:1568637059088916520>",
+  bar_mf: "<:bar_mf:1568637066105851994>",
+  bar_rf: "<:bar_rf:1568637073177579743>",
+  bar_le: "<:bar_le:1568637080601497623>",
+  bar_me: "<:bar_me:1568637088096583750>",
+  bar_re: "<:bar_re:1568637095558258709>",
+  bar_single_f: "<:bar_single_f:1568637103095554099>",
 };
 
 // Unified shared dictionary supporting both top-level and categorized access
@@ -271,6 +309,27 @@ const emojis = {
 
     return `${filled}${empty}`;
   },
+
+  /**
+   * Resolve appropriate emoji for a specific bot client in the multi-bot fleet
+   */
+  getEmoji(key, client = null) {
+    if (client?.user?.id && fleetEmojis[client.user.id]?.[key]) {
+      return fleetEmojis[client.user.id][key];
+    }
+    return EMOJI_CONFIG[key] || UNICODE_FALLBACKS[key] || "";
+  },
+
+  unicode: UNICODE_FALLBACKS,
 };
+
+// Optional fleet emojis lookup if multi-bot applications are configured
+let fleetEmojis = {};
+try {
+  const fleetData = require("./applicationEmojis.json");
+  if (fleetData && fleetData.fleet) {
+    fleetEmojis = fleetData.fleet;
+  }
+} catch (_) {}
 
 module.exports = emojis;

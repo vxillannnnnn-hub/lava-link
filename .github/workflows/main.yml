@@ -27,8 +27,14 @@ jobs:
     env:
       DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       DISCORD_TOKENS: ${{ secrets.DISCORD_TOKENS }}
+      DISCORD_TOKEN_2: ${{ secrets.DISCORD_TOKEN_2 }}
+      DISCORD_TOKEN_3: ${{ secrets.DISCORD_TOKEN_3 }}
+      DISCORD_TOKEN_4: ${{ secrets.DISCORD_TOKEN_4 }}
       ALL_BOT_IDS: ${{ secrets.ALL_BOT_IDS }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_ID_2: ${{ secrets.CLIENT_ID_2 }}
+      CLIENT_ID_3: ${{ secrets.CLIENT_ID_3 }}
+      CLIENT_ID_4: ${{ secrets.CLIENT_ID_4 }}
       GUILD_ID: ${{ secrets.GUILD_ID }}
       NODE_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
 

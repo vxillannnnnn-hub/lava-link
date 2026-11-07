@@ -83,13 +83,21 @@ function parseMessage(message, guildPrefix = ".", clientUser) {
   const content = message.content.trim();
   if (!content) return null;
 
-  const escapedPrefix = escapeRegex(guildPrefix || ".");
+  const cleanGuildPrefix = (guildPrefix || ".").trim();
+  const escapedPrefix = escapeRegex(cleanGuildPrefix);
   const clientId = clientUser?.id || "";
 
-  // Regex pattern matches:
-  // ^(<@!?clientId>|escapedPrefix)\s*
-  // This seamlessly captures ".play", ". play", ".   play", and "@Bot play"!
-  const prefixPattern = new RegExp(`^(<@!?${clientId}>|${escapedPrefix})\\s*`, "i");
+  // Match:
+  // 1. Direct bot mention: <@!clientId> or <@clientId>
+  // 2. Configured server prefix
+  // 3. Always allow standard '.' prefix as reliable fallback
+  const prefixes = [escapedPrefix];
+  if (cleanGuildPrefix !== ".") {
+    prefixes.push("\\.");
+  }
+  const prefixGroup = prefixes.join("|");
+
+  const prefixPattern = new RegExp(`^(<@!?${clientId}>|${prefixGroup})\\s*`, "i");
   const match = content.match(prefixPattern);
 
   if (!match) return null;

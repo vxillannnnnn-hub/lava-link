@@ -9,7 +9,7 @@ const logger = require("../../utils/logger");
 module.exports = {
   name: "messageCreate",
   async execute(message, client) {
-    if (message.author.bot || !message.guild) return;
+    if (!message || message.author?.bot || !message.guild) return;
 
     // 1. Dedicated Song-Request Channel routing (e.g. #song-requests)
     const isRequest = await handleSongRequestMessage(message, client);
@@ -22,50 +22,61 @@ module.exports = {
     const parsed = parseMessage(message, guildPrefix, client.user);
     if (!parsed) return;
 
-    // 4. Jockie Multi-Bot Coordinator arbitration
+    // 4. Ensure guild member is cached or resolved for permission & voice checks
+    if (!message.member && message.guild) {
+      try {
+        message.member = await message.guild.members.fetch(message.author.id);
+      } catch (_) {}
+    }
+
+    // 5. Look up matching application command (resolves command name or alias)
+    const canonicalName = client.aliases.get(parsed.commandName) || parsed.commandName;
+    const command = client.commands.get(canonicalName);
+    if (!command) return;
+
+    // 6. Jockie Multi-Bot Coordinator arbitration (guild-aware & session affinity)
     const shouldHandle = multiBotCoordinator.shouldHandle(
       client,
       message,
       client.botIndex || 0,
-      parsed
+      { ...parsed, commandName: canonicalName }
     );
     if (!shouldHandle) return;
 
-    // 5. Look up matching application command
-    const command = client.commands.get(parsed.commandName);
-    if (!command) return;
-
-    // 6. Enforce voice channel safety for music commands (excludes non-voice management/informational commands)
+    // 7. Enforce voice channel safety for music commands (excludes non-voice informational commands)
     const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist"];
     if (command.category === "music" && !exemptMusicCommands.includes(command.data.name)) {
-      if (!message.member?.voice?.channelId) {
+      const voiceState = message.guild.voiceStates.cache.get(message.author.id);
+      const userVoiceChannelId = message.member?.voice?.channelId || voiceState?.channelId;
+
+      if (!userVoiceChannelId) {
         return message.reply(
           warnText("You must be connected to a voice channel to use music commands.")
-        ).catch(() => {});
+        ).catch(() => message.channel.send(warnText("You must be connected to a voice channel to use music commands.")).catch(() => {}));
       }
 
       const player = client.lavalink.getPlayer(message.guild.id);
-      if (player && player.voiceChannelId && message.member.voice.channelId !== player.voiceChannelId) {
+      if (player && player.voiceChannelId && userVoiceChannelId !== player.voiceChannelId) {
         return message.reply(
           warnText(`You must be in the same voice channel (<#${player.voiceChannelId}>) as the bot to use music controls.`)
-        ).catch(() => {});
+        ).catch(() => message.channel.send(warnText(`You must be in the same voice channel (<#${player.voiceChannelId}>) as the bot to use music controls.`)).catch(() => {}));
       }
     }
 
-    // 7. Instantiate unified CommandContext adapter
+    // 8. Instantiate unified CommandContext adapter
     const ctx = new CommandContext({
       message,
       client,
-      commandName: parsed.commandName,
+      commandName: canonicalName,
       args: parsed.args,
       prefix: guildPrefix,
     });
 
-    // 8. Execute command safely
+    // 9. Execute command safely with dual reply fallback
     try {
       await command.execute(ctx, client);
     } catch (err) {
-      logger.error(`Error executing prefix command "${parsed.commandName}":`, err);
+      logger.error(`Error executing prefix command "${canonicalName}":`, err);
       try {
         await ctx.reply(errorText(`Error executing command: \`${err.message}\``));
       } catch (_) {}

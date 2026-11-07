@@ -41,7 +41,7 @@ class BotClient extends Client {
         GuildEmojiManager: 0,
         GuildStickerManager: 0,
         GuildMemberManager: {
-          maxSize: 50,
+          maxSize: 200,
           keepOverLimit: (member) => member.id === member.client?.user?.id,
         },
       }),
@@ -79,6 +79,14 @@ class BotClient extends Client {
 
     // Forward raw Discord gateway packets directly to Lavalink for Voice Server Update / Voice State Update
     this.on("raw", (data) => this.lavalink.sendRawData(data));
+
+    // Register with multiBotCoordinator once logged in
+    this.once("ready", () => {
+      try {
+        const multiBotCoordinator = require("../utils/multiBotCoordinator");
+        multiBotCoordinator.registerClient(this);
+      } catch (_) {}
+    });
   }
 
   /**

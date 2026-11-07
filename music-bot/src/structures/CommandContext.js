@@ -18,9 +18,9 @@ class CommandContext {
     this.guildId = this.guild?.id || null;
     this.channel = interaction?.channel || message?.channel || null;
     this.channelId = this.channel?.id || null;
-    this.member = interaction?.member || message?.member || null;
     this.user = interaction?.user || message?.author || null;
     this.author = this.user;
+    this.member = interaction?.member || message?.member || (this.guild && this.user ? this.guild.members.cache.get(this.user.id) : null);
     this.createdTimestamp = interaction?.createdTimestamp || message?.createdTimestamp || Date.now();
 
     this.replied = false;
@@ -123,7 +123,7 @@ class CommandContext {
     }
     // For text prefix commands, trigger the typing status in channel
     try {
-      await this.channel.sendTyping();
+      await this.channel?.sendTyping();
     } catch (_) {}
     return null;
   }
@@ -146,7 +146,7 @@ class CommandContext {
   }
 
   /**
-   * Send command reply
+   * Send command reply (with channel.send fallback if reply lacks permissions or fails)
    */
   async reply(payload) {
     this.replied = true;
@@ -155,7 +155,12 @@ class CommandContext {
     }
 
     const msgPayload = this._sanitizeMessagePayload(payload);
-    this._sentMessage = await this.message.reply(msgPayload);
+    try {
+      this._sentMessage = await this.message.reply(msgPayload);
+    } catch (_) {
+      // Fallback: If message.reply fails (e.g. missing Read Message History or message deleted), send to channel directly
+      this._sentMessage = await this.channel.send(msgPayload).catch(() => null);
+    }
     return this._sentMessage;
   }
 
@@ -171,10 +176,18 @@ class CommandContext {
     const msgPayload = this._sanitizeMessagePayload(payload);
 
     if (this._sentMessage) {
-      return this._sentMessage.edit(msgPayload);
+      try {
+        return await this._sentMessage.edit(msgPayload);
+      } catch (_) {
+        // If editing original message fails (e.g. message deleted), send fresh channel message
+      }
     }
 
-    this._sentMessage = await this.message.reply(msgPayload);
+    try {
+      this._sentMessage = await this.message.reply(msgPayload);
+    } catch (_) {
+      this._sentMessage = await this.channel.send(msgPayload).catch(() => null);
+    }
     return this._sentMessage;
   }
 

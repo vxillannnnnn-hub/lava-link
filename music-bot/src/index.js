@@ -17,7 +17,10 @@ const BANNER = `
 
 console.log(BANNER);
 
+const multiBotCoordinator = require("./utils/multiBotCoordinator");
+
 const client = new BotClient();
+multiBotCoordinator.registerClient(client);
 
 // Handle unexpected process errors cleanly
 process.on("unhandledRejection", (reason, promise) => {

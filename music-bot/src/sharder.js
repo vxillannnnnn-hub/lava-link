@@ -86,6 +86,7 @@ if (tokens.length > 1) {
       token,
       botIndex: i,
     });
+    multiBotCoordinator.registerClient(client);
     clients.push(client);
   }
 
