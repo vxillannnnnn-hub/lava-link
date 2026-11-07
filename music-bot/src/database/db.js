@@ -100,9 +100,18 @@ try {
   throw err;
 }
 
-// Safe migration for existing databases: ensure prefix column exists
+// Safe migration for existing databases: ensure prefix and 24/7 columns exist
 try {
   db.exec("ALTER TABLE guild_settings ADD COLUMN prefix TEXT DEFAULT '.'");
+} catch (_) {}
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN mode_247 INTEGER DEFAULT 0");
+} catch (_) {}
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN voice_247_channel_id TEXT");
+} catch (_) {}
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN text_247_channel_id TEXT");
 } catch (_) {}
 
 // In-memory prefix cache for sub-microsecond command routing
@@ -116,8 +125,9 @@ const stmts = {
   upsertGuild: db.prepare(`
     INSERT INTO guild_settings (
       guild_id, prefix, request_channel_id, request_message_id,
-      dj_role_id, dj_enabled, auto_pause_enabled, stage_auto_speaker, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      dj_role_id, dj_enabled, auto_pause_enabled, stage_auto_speaker,
+      mode_247, voice_247_channel_id, text_247_channel_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       prefix = coalesce(excluded.prefix, guild_settings.prefix),
       request_channel_id = coalesce(excluded.request_channel_id, guild_settings.request_channel_id),
@@ -126,6 +136,9 @@ const stmts = {
       dj_enabled = excluded.dj_enabled,
       auto_pause_enabled = excluded.auto_pause_enabled,
       stage_auto_speaker = excluded.stage_auto_speaker,
+      mode_247 = excluded.mode_247,
+      voice_247_channel_id = excluded.voice_247_channel_id,
+      text_247_channel_id = excluded.text_247_channel_id,
       updated_at = excluded.updated_at
   `),
   setPrefix: db.prepare(`
@@ -155,6 +168,22 @@ const stmts = {
       dj_role_id = excluded.dj_role_id,
       dj_enabled = excluded.dj_enabled,
       updated_at = excluded.updated_at
+  `),
+  set247: db.prepare(`
+    INSERT INTO guild_settings (guild_id, mode_247, voice_247_channel_id, text_247_channel_id, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      mode_247 = excluded.mode_247,
+      voice_247_channel_id = excluded.voice_247_channel_id,
+      text_247_channel_id = excluded.text_247_channel_id,
+      updated_at = excluded.updated_at
+  `),
+  get247: db.prepare(`
+    SELECT mode_247, voice_247_channel_id, text_247_channel_id FROM guild_settings WHERE guild_id = ?
+  `),
+  getAll247Guilds: db.prepare(`
+    SELECT guild_id, voice_247_channel_id, text_247_channel_id FROM guild_settings
+    WHERE mode_247 = 1 AND voice_247_channel_id IS NOT NULL
   `),
   getAllPlaylistsWithTracks: db.prepare(`
     SELECT p.id as playlist_id, p.user_id, p.name, p.created_at,
@@ -249,6 +278,9 @@ function exportJson() {
         dj_enabled: Boolean(g.dj_enabled),
         auto_pause_enabled: g.auto_pause_enabled !== 0,
         stage_auto_speaker: g.stage_auto_speaker !== 0,
+        mode_247: Boolean(g.mode_247),
+        voice_247_channel_id: g.voice_247_channel_id || null,
+        text_247_channel_id: g.text_247_channel_id || null,
         updated_at: g.updated_at || Date.now(),
       };
     }
@@ -319,6 +351,9 @@ function syncDualStorage() {
               data.dj_enabled ? 1 : 0,
               data.auto_pause_enabled === false ? 0 : 1,
               data.stage_auto_speaker === false ? 0 : 1,
+              data.mode_247 ? 1 : 0,
+              data.voice_247_channel_id || null,
+              data.text_247_channel_id || null,
               data.updated_at || Date.now()
             );
             prefixCache.set(guildId, data.prefix || ".");
@@ -457,6 +492,48 @@ module.exports = {
     exportJson();
     notifyChange();
     return res;
+  },
+
+  set247(guildId, enabled, voiceChannelId = null, textChannelId = null) {
+    try {
+      const res = stmts.set247.run(
+        guildId,
+        enabled ? 1 : 0,
+        enabled ? voiceChannelId : null,
+        enabled ? textChannelId : null,
+        Date.now()
+      );
+      checkpoint();
+      exportJson();
+      notifyChange();
+      return res;
+    } catch (err) {
+      logger.error(`[Database] Failed to save 24/7 settings for guild ${guildId}:`, err.message);
+      return false;
+    }
+  },
+
+  get247(guildId) {
+    try {
+      const row = stmts.get247.get(guildId);
+      return {
+        enabled: Boolean(row?.mode_247),
+        voiceChannelId: row?.voice_247_channel_id || null,
+        textChannelId: row?.text_247_channel_id || null,
+      };
+    } catch (err) {
+      logger.error(`[Database] Failed to get 24/7 settings for guild ${guildId}:`, err.message);
+      return { enabled: false, voiceChannelId: null, textChannelId: null };
+    }
+  },
+
+  getAll247Guilds() {
+    try {
+      return stmts.getAll247Guilds.all();
+    } catch (err) {
+      logger.error("[Database] Failed to fetch 24/7 guilds:", err.message);
+      return [];
+    }
   },
 
   // Playlists

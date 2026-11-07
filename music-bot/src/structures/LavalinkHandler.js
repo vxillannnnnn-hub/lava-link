@@ -11,6 +11,7 @@ const voiceStatusManager = require("../utils/voiceStatusManager");
 const presenceManager = require("../utils/presenceManager");
 const audioOptimizer = require("../utils/audioOptimizer");
 const stateManager = require("../utils/stateManager");
+const { reconnect247 } = require("../utils/reconnect247");
 
 /**
  * Initialize and attach optimized LavalinkManager to BotClient
@@ -81,6 +82,9 @@ function initLavalink(client) {
 
     // Restore active player queues and playback across runner restarts
     await stateManager.restoreState(client);
+
+    // Auto-reconnect all permanent 24/7 channels across all configured servers
+    await reconnect247(client);
   });
 
   manager.nodeManager.on("disconnect", (node, reason) => {

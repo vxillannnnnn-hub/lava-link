@@ -56,8 +56,10 @@ class StateManager {
       for (const [guildId, player] of client.lavalink.players.entries()) {
         if (!player || !player.voiceChannelId) continue;
 
-        // Only save sessions that have an active track or upcoming queue
-        if (!player.queue.current && player.queue.tracks.length === 0) continue;
+        const is247 = Boolean(player.get("247"));
+
+        // Only save sessions that have an active track, upcoming queue, OR are in 24/7 mode
+        if (!player.queue.current && player.queue.tracks.length === 0 && !is247) continue;
 
         const currentTrack = player.queue.current ? {
           encoded: player.queue.current.encoded,
@@ -80,6 +82,7 @@ class StateManager {
           volume: player.volume || 100,
           repeatMode: player.repeatMode || "off",
           autoplay: Boolean(player.get("autoplay")),
+          is247,
           currentTrack,
           queue: queueTracks,
         });
@@ -114,15 +117,16 @@ class StateManager {
       db.checkpoint();
       db.exportJson();
 
+      const repoRoot = path.resolve(__dirname, "..", "..");
       const branch = process.env.GITHUB_REF_NAME || "main";
       const gitCmd = [
         'git config user.name "github-actions[bot]"',
         'git config user.email "github-actions[bot]@users.noreply.github.com"',
-        "git add -f music-bot/data/guild_settings.json music-bot/data/user_playlists.json music-bot/data/user_favorites.json music-bot/data/active_sessions.json music-bot/data/bot.db 2>/dev/null",
-        'git diff --staged --quiet || (git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" && git pull --rebase origin ' + branch + ' -X ours && git push origin ' + branch + ")",
+        'git add -f music-bot/data/guild_settings.json music-bot/data/user_playlists.json music-bot/data/user_favorites.json music-bot/data/active_sessions.json music-bot/data/bot.db 2>/dev/null || true',
+        'if ! git diff --staged --quiet; then git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" && git fetch origin ' + branch + ' && (git rebase -X ours origin/' + branch + ' || (git rebase --abort && git pull --rebase origin ' + branch + ')) && git push origin ' + branch + '; fi'
       ].join(" && ");
 
-      execSync(gitCmd, { stdio: "pipe", timeout: 45000, shell: "/bin/bash" });
+      execSync(gitCmd, { cwd: repoRoot, stdio: "pipe", timeout: 45000, shell: "/bin/bash" });
       logger.success("[StateManager] ✅ Persistent database state successfully synced to Git repository.");
       this.isDirty = false;
     } catch (err) {
@@ -173,12 +177,12 @@ class StateManager {
           const voiceChannel = guild.channels.cache.get(session.voiceChannelId) || await guild.channels.fetch(session.voiceChannelId).catch(() => null);
           if (!voiceChannel) continue;
 
-          // Check if voice channel still has active human listeners
+          // Check if voice channel still has active human listeners (skip only if not 24/7)
           const humanListeners = guild.voiceStates.cache.filter(
             (vs) => vs.channelId === session.voiceChannelId && vs.id !== client.user.id
           ).size;
 
-          if (humanListeners === 0 && !session.autoplay) {
+          if (humanListeners === 0 && !session.autoplay && !session.is247) {
             logger.debug(`[StateManager] Voice channel in ${guild.name} is empty. Skipping restore.`);
             continue;
           }
@@ -196,6 +200,7 @@ class StateManager {
           }
 
           player.set("autoplay", session.autoplay);
+          player.set("247", Boolean(session.is247));
           if (session.repeatMode && player.setRepeatMode) {
             player.setRepeatMode(session.repeatMode);
           }
@@ -222,6 +227,19 @@ class StateManager {
             const builtCurrent = client.lavalink.utils?.buildTrack
               ? client.lavalink.utils.buildTrack(session.currentTrack, session.currentTrack.requester)
               : session.currentTrack;
+
+            await player.play({
+              clientTrack: builtCurrent,
+              position: session.position || 0,
+              paused: session.paused || false,
+            });
+
+            restoredCount++;
+          } else if (session.is247) {
+            const voiceStatusManager = require("./voiceStatusManager");
+            voiceStatusManager.setIdleVoiceStatus(client, session.voiceChannelId, session.guildId);
+            restoredCount++;
+          }
 
             await player.play({
               clientTrack: builtCurrent,

@@ -7,6 +7,9 @@
     "dj_enabled": false,
     "auto_pause_enabled": true,
     "stage_auto_speaker": true,
+    "mode_247": false,
+    "voice_247_channel_id": null,
+    "text_247_channel_id": null,
     "updated_at": 1794036672279
   },
   "test_guild_999": {
@@ -17,6 +20,9 @@
     "dj_enabled": false,
     "auto_pause_enabled": true,
     "stage_auto_speaker": true,
+    "mode_247": false,
+    "voice_247_channel_id": null,
+    "text_247_channel_id": null,
     "updated_at": 1794036770057
   }
 }

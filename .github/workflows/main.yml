@@ -305,17 +305,21 @@ jobs:
           restore-keys: |
             bot-persistent-v6-${{ github.ref_name }}-
 
-      - name: Fallback Restore from Previous Artifact Backup
+      - name: Restore Persistent Bot Data from Artifact Backup
         if: matrix.component == 'music-bot'
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p music-bot/data
-          # If neither guild_settings.json nor bot.db exists with content > 100 bytes, download latest artifact backup
-          if [ ! -s "music-bot/data/guild_settings.json" ] && [ ! -s "music-bot/data/bot.db" ]; then
-            echo "Local cache miss or empty data detected. Downloading bot-backup-latest artifact..."
-            gh run download --name bot-backup-latest --dir music-bot/data 2>/dev/null || true
+          mkdir -p /tmp/artifact_data
+          echo "Attempting to download latest persistent artifact backup..."
+          if gh run download --name bot-backup-latest --dir /tmp/artifact_data 2>/dev/null; then
+            echo "✅ Successfully downloaded bot-backup-latest artifact! Restoring data files..."
+            cp -rf /tmp/artifact_data/* music-bot/data/ 2>/dev/null || true
+            rm -rf /tmp/artifact_data
+          else
+            echo "No prior bot-backup-latest artifact found (or fresh runner). Using repo storage."
           fi
           echo "Persistent data files on disk:"
           ls -la music-bot/data || true
@@ -469,6 +473,8 @@ jobs:
 
       - name: Commit and Push Persistent State to Repository
         if: matrix.component == 'music-bot' && always()
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -488,16 +494,16 @@ jobs:
             # Robust push with rebase favoring runtime changes
             for attempt in 1 2 3; do
               echo "Push attempt $attempt..."
-              git fetch origin ${{ github.ref_name }} || true
+              git fetch --unshallow 2>/dev/null || git fetch origin ${{ github.ref_name }} || true
               if git rebase -X ours origin/${{ github.ref_name }}; then
-                if git push origin ${{ github.ref_name }}; then
+                if git push https://x-access-token:${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}; then
                   echo "✅ Persistent state pushed successfully!"
                   break
                 fi
               else
                 git rebase --abort || true
                 git pull --rebase origin ${{ github.ref_name }} || true
-                if git push origin ${{ github.ref_name }}; then
+                if git push https://x-access-token:${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}; then
                   echo "✅ Persistent state pushed successfully after rebase!"
                   break
                 fi

@@ -47,11 +47,11 @@ module.exports = {
     templates: [
       "{title} by - {author}",          // Exact user-requested format
       "{title} by {author}",            // Clean classic format
-      "Playing: {title} by {author}",   // Streaming standard
-      "[{duration}] {title} by {author}", // Timestamped layout
+      "Playing : {title} by {author}",   // Streaming standard
+      "- {title} by {author}", // Timestamped layout
       "{title} - {author}",             // Minimalist format
       "Listening to {title} - {author}",// Rich presence format
-      "{title} | {author}",             // Modern pipe separator
+      "{title} || {author}",             // Modern pipe separator
     ],
     idleTemplates: [
       "Use /play to listen to music",

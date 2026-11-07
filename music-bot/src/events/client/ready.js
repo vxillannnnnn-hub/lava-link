@@ -3,6 +3,7 @@ const logger = require("../../utils/logger");
 const stateManager = require("../../utils/stateManager");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 const presenceManager = require("../../utils/presenceManager");
+const { start247HealthCheck } = require("../../utils/reconnect247");
 
 module.exports = {
   name: Events.ClientReady || "clientReady",
@@ -31,6 +32,9 @@ module.exports = {
 
     // Initialize real-time Dynamic Streaming Presence Engine (ActivityType.Streaming)
     presenceManager.initPresence(client);
+
+    // Arm self-healing 60-second health check to keep 24/7 channels connected permanently
+    start247HealthCheck(client);
 
     logger.success(`${shardInfo}Audio Engine is armed and connected to Lavalink.`);
     logger.info(`${shardInfo}Dynamic Streaming Presence engine armed (ActivityType.Streaming - purple badge)`);
