@@ -212,7 +212,14 @@ async function syncApplicationEmojis(token, botLabel = "Bot") {
 
     console.log(`  ⚡ Uploading thin "${emojiName}"...`);
     try {
-      const b64 = await convertSvgToPngBase64(svg);
+      let b64;
+      const localPng = path.join(__dirname, "..", "..", "assets", "emojis", `${emojiName}.png`);
+      if (fs.existsSync(localPng)) {
+        const buf = fs.readFileSync(localPng);
+        b64 = `data:image/png;base64,${buf.toString("base64")}`;
+      } else {
+        b64 = await convertSvgToPngBase64(svg);
+      }
       const createRes = await fetch(`https://discord.com/api/v10/applications/${appId}/emojis`, {
         method: "POST",
         headers: {

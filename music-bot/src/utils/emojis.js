@@ -161,6 +161,10 @@ const EMOJI_CONFIG = {
   bar_single_f: "<:bar_single_f:1568637103095554099>",
 };
 
+// GitHub Assets CDN Base for Direct Image Fallbacks
+const GITHUB_ASSETS_BASE = "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis";
+let isFallbackMode = false;
+
 // Unified shared dictionary supporting both top-level and categorized access
 const emojis = {
   ...EMOJI_CONFIG,
@@ -314,12 +318,53 @@ const emojis = {
    * Resolve appropriate emoji for a specific bot client in the multi-bot fleet
    */
   getEmoji(key, client = null) {
+    if (isFallbackMode) {
+      return UNICODE_FALLBACKS[key] || "•";
+    }
     if (client?.user?.id && fleetEmojis[client.user.id]?.[key]) {
       return fleetEmojis[client.user.id][key];
     }
     return EMOJI_CONFIG[key] || UNICODE_FALLBACKS[key] || "";
   },
 
+  /**
+   * Safe Component Button Emoji Resolver:
+   * Returns parsed custom emoji object { id, name } or Unicode string fallback.
+   * If in fallback mode, returns unicode fallback directly.
+   */
+  getButtonEmoji(key, client = null) {
+    if (isFallbackMode) {
+      return UNICODE_FALLBACKS[key] || "•";
+    }
+    const raw = this.getEmoji(key, client);
+    if (!raw) return UNICODE_FALLBACKS[key] || "•";
+    const match = raw.match(/<a?:([a-zA-Z0-9_]+):(\d+)>/);
+    if (match) {
+      return { name: match[1], id: match[2] };
+    }
+    return raw;
+  },
+
+  /**
+   * Direct GitHub Repository CDN raw URL for every emoji asset in assets/emojis/
+   */
+  getCdnUrl(key) {
+    const cleanKey = (key || "").replace(/[^a-zA-Z0-9_]/g, "").toLowerCase();
+    return `${GITHUB_ASSETS_BASE}/${cleanKey}.png`;
+  },
+
+  /**
+   * Switch all bot emojis bot-wide to clean Unicode fallbacks if Discord has an emoji outage
+   */
+  setFallbackMode(enabled) {
+    isFallbackMode = Boolean(enabled);
+  },
+
+  isFallbackMode() {
+    return isFallbackMode;
+  },
+
+  cdnBase: GITHUB_ASSETS_BASE,
   unicode: UNICODE_FALLBACKS,
 };
 
@@ -332,4 +377,14 @@ try {
   }
 } catch (_) {}
 
-module.exports = emojis;
+// Wrap in dynamic Proxy so when isFallbackMode is toggled, emojis.play automatically returns unicode "▶"
+const proxyEmojis = new Proxy(emojis, {
+  get(target, prop, receiver) {
+    if (isFallbackMode && typeof prop === "string" && UNICODE_FALLBACKS[prop]) {
+      return UNICODE_FALLBACKS[prop];
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});
+
+module.exports = proxyEmojis;

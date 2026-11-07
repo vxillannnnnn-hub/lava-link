@@ -1,0 +1,326 @@
+{
+  "play": {
+    "name": "play",
+    "svgFile": "play.svg",
+    "pngFile": "play.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/play.png",
+    "unicode": "▶",
+    "emojiId": "1568636872971001916",
+    "discordTag": "<:play:1568636872971001916>"
+  },
+  "pause": {
+    "name": "pause",
+    "svgFile": "pause.svg",
+    "pngFile": "pause.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/pause.png",
+    "unicode": "⏸",
+    "emojiId": "1568636879945859094",
+    "discordTag": "<:pause:1568636879945859094>"
+  },
+  "playpause": {
+    "name": "playpause",
+    "svgFile": "playpause.svg",
+    "pngFile": "playpause.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/playpause.png",
+    "unicode": "⏯",
+    "emojiId": "1568636887374106634",
+    "discordTag": "<:playpause:1568636887374106634>"
+  },
+  "skip": {
+    "name": "skip",
+    "svgFile": "skip.svg",
+    "pngFile": "skip.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/skip.png",
+    "unicode": "⏭",
+    "emojiId": "1568636894567203016",
+    "discordTag": "<:skip:1568636894567203016>"
+  },
+  "previous": {
+    "name": "previous",
+    "svgFile": "previous.svg",
+    "pngFile": "previous.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/previous.png",
+    "unicode": "⏮",
+    "emojiId": "1568636898631614595",
+    "discordTag": "<:previous:1568636898631614595>"
+  },
+  "stop": {
+    "name": "stop",
+    "svgFile": "stop.svg",
+    "pngFile": "stop.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/stop.png",
+    "unicode": "⏹",
+    "emojiId": "1568636906634346611",
+    "discordTag": "<:stop:1568636906634346611>"
+  },
+  "loop": {
+    "name": "loop",
+    "svgFile": "loop.svg",
+    "pngFile": "loop.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/loop.png",
+    "unicode": "↻",
+    "emojiId": "1568636915270426737",
+    "discordTag": "<:loop:1568636915270426737>"
+  },
+  "loop_one": {
+    "name": "loop_one",
+    "svgFile": "loop_one.svg",
+    "pngFile": "loop_one.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/loop_one.png",
+    "unicode": "↺",
+    "emojiId": "1568636919498416188",
+    "discordTag": "<:loop_one:1568636919498416188>"
+  },
+  "shuffle": {
+    "name": "shuffle",
+    "svgFile": "shuffle.svg",
+    "pngFile": "shuffle.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/shuffle.png",
+    "unicode": "⤨",
+    "emojiId": "1568636923684323419",
+    "discordTag": "<:shuffle:1568636923684323419>"
+  },
+  "autoplay": {
+    "name": "autoplay",
+    "svgFile": "autoplay.svg",
+    "pngFile": "autoplay.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/autoplay.png",
+    "unicode": "∞",
+    "emojiId": "1568636927987421194",
+    "discordTag": "<:autoplay:1568636927987421194>"
+  },
+  "heart": {
+    "name": "heart",
+    "svgFile": "heart.svg",
+    "pngFile": "heart.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/heart.png",
+    "unicode": "♡",
+    "emojiId": "1568636935508066304",
+    "discordTag": "<:heart:1568636935508066304>"
+  },
+  "queue": {
+    "name": "queue",
+    "svgFile": "queue.svg",
+    "pngFile": "queue.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/queue.png",
+    "unicode": "☰",
+    "emojiId": "1568636942785056779",
+    "discordTag": "<:queue:1568636942785056779>"
+  },
+  "volume": {
+    "name": "volume",
+    "svgFile": "volume.svg",
+    "pngFile": "volume.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/volume.png",
+    "unicode": "🔊",
+    "emojiId": "1568636950146056282",
+    "discordTag": "<:volume:1568636950146056282>"
+  },
+  "volumelow": {
+    "name": "volumelow",
+    "svgFile": "volumelow.svg",
+    "pngFile": "volumelow.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/volumelow.png",
+    "unicode": "🔉",
+    "emojiId": "1568636954646421666",
+    "discordTag": "<:volumelow:1568636954646421666>"
+  },
+  "volumemute": {
+    "name": "volumemute",
+    "svgFile": "volumemute.svg",
+    "pngFile": "volumemute.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/volumemute.png",
+    "unicode": "🔇",
+    "emojiId": "1568636958744379606",
+    "discordTag": "<:volumemute:1568636958744379606>"
+  },
+  "equalizer": {
+    "name": "equalizer",
+    "svgFile": "equalizer.svg",
+    "pngFile": "equalizer.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/equalizer.png",
+    "unicode": "🎚",
+    "emojiId": null,
+    "discordTag": "🎚"
+  },
+  "sparkles": {
+    "name": "sparkles",
+    "svgFile": "sparkles.svg",
+    "pngFile": "sparkles.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/sparkles.png",
+    "unicode": "✦",
+    "emojiId": "1568636966386278594",
+    "discordTag": "<:sparkles:1568636966386278594>"
+  },
+  "music": {
+    "name": "music",
+    "svgFile": "music.svg",
+    "pngFile": "music.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/music.png",
+    "unicode": "♫",
+    "emojiId": "1568636978508075189",
+    "discordTag": "<:music:1568636978508075189>"
+  },
+  "disc": {
+    "name": "disc",
+    "svgFile": "disc.svg",
+    "pngFile": "disc.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/disc.png",
+    "unicode": "◎",
+    "emojiId": "1568636991225077770",
+    "discordTag": "<:disc:1568636991225077770>"
+  },
+  "radio": {
+    "name": "radio",
+    "svgFile": "radio.svg",
+    "pngFile": "radio.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/radio.png",
+    "unicode": "◉",
+    "emojiId": "1568636998330089592",
+    "discordTag": "<:radio:1568636998330089592>"
+  },
+  "dj": {
+    "name": "dj",
+    "svgFile": "dj.svg",
+    "pngFile": "dj.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/dj.png",
+    "unicode": "◈",
+    "emojiId": "1568637006114983986",
+    "discordTag": "<:dj:1568637006114983986>"
+  },
+  "fire": {
+    "name": "fire",
+    "svgFile": "fire.svg",
+    "pngFile": "fire.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/fire.png",
+    "unicode": "▲",
+    "emojiId": "1568637013916262430",
+    "discordTag": "<:fire:1568637013916262430>"
+  },
+  "check": {
+    "name": "check",
+    "svgFile": "check.svg",
+    "pngFile": "check.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/check.png",
+    "unicode": "✓",
+    "emojiId": "1568637021130465461",
+    "discordTag": "<:check:1568637021130465461>"
+  },
+  "cross": {
+    "name": "cross",
+    "svgFile": "cross.svg",
+    "pngFile": "cross.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/cross.png",
+    "unicode": "✕",
+    "emojiId": "1568637028852170958",
+    "discordTag": "<:cross:1568637028852170958>"
+  },
+  "search": {
+    "name": "search",
+    "svgFile": "search.svg",
+    "pngFile": "search.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/search.png",
+    "unicode": "🔍",
+    "emojiId": null,
+    "discordTag": "🔍"
+  },
+  "settings": {
+    "name": "settings",
+    "svgFile": "settings.svg",
+    "pngFile": "settings.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/settings.png",
+    "unicode": "⚙",
+    "emojiId": null,
+    "discordTag": "⚙"
+  },
+  "spotify": {
+    "name": "spotify",
+    "svgFile": "spotify.svg",
+    "pngFile": "spotify.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/spotify.png",
+    "unicode": "♫",
+    "emojiId": "1568637036620030132",
+    "discordTag": "<:spotify:1568637036620030132>"
+  },
+  "youtube": {
+    "name": "youtube",
+    "svgFile": "youtube.svg",
+    "pngFile": "youtube.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/youtube.png",
+    "unicode": "▶",
+    "emojiId": "1568637043930828914",
+    "discordTag": "<:youtube:1568637043930828914>"
+  },
+  "soundcloud": {
+    "name": "soundcloud",
+    "svgFile": "soundcloud.svg",
+    "pngFile": "soundcloud.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/soundcloud.png",
+    "unicode": "☁",
+    "emojiId": "1568637051497091082",
+    "discordTag": "<:soundcloud:1568637051497091082>"
+  },
+  "bar_lf": {
+    "name": "bar_lf",
+    "svgFile": "bar_lf.svg",
+    "pngFile": "bar_lf.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_lf.png",
+    "unicode": "━",
+    "emojiId": "1568637059088916520",
+    "discordTag": "<:bar_lf:1568637059088916520>"
+  },
+  "bar_mf": {
+    "name": "bar_mf",
+    "svgFile": "bar_mf.svg",
+    "pngFile": "bar_mf.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_mf.png",
+    "unicode": "━",
+    "emojiId": "1568637066105851994",
+    "discordTag": "<:bar_mf:1568637066105851994>"
+  },
+  "bar_rf": {
+    "name": "bar_rf",
+    "svgFile": "bar_rf.svg",
+    "pngFile": "bar_rf.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_rf.png",
+    "unicode": "━",
+    "emojiId": "1568637073177579743",
+    "discordTag": "<:bar_rf:1568637073177579743>"
+  },
+  "bar_le": {
+    "name": "bar_le",
+    "svgFile": "bar_le.svg",
+    "pngFile": "bar_le.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_le.png",
+    "unicode": "─",
+    "emojiId": "1568637080601497623",
+    "discordTag": "<:bar_le:1568637080601497623>"
+  },
+  "bar_me": {
+    "name": "bar_me",
+    "svgFile": "bar_me.svg",
+    "pngFile": "bar_me.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_me.png",
+    "unicode": "─",
+    "emojiId": "1568637088096583750",
+    "discordTag": "<:bar_me:1568637088096583750>"
+  },
+  "bar_re": {
+    "name": "bar_re",
+    "svgFile": "bar_re.svg",
+    "pngFile": "bar_re.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_re.png",
+    "unicode": "─",
+    "emojiId": "1568637095558258709",
+    "discordTag": "<:bar_re:1568637095558258709>"
+  },
+  "bar_single_f": {
+    "name": "bar_single_f",
+    "svgFile": "bar_single_f.svg",
+    "pngFile": "bar_single_f.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/bar_single_f.png",
+    "unicode": "━",
+    "emojiId": "1568637103095554099",
+    "discordTag": "<:bar_single_f:1568637103095554099>"
+  }
+}
