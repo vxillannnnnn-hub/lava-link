@@ -101,10 +101,8 @@ if (tokens.length > 1) {
   const cleanup = async (signal) => {
     logger.info(`Received ${signal}. Shutting down all ${clients.length} multi-bot instance(s) cleanly...`);
     try {
-      if (clients[0]) {
-        stateManager.saveState(clients[0]);
-        stateManager.syncToGitSync();
-      }
+      stateManager.saveState(clients);
+      stateManager.syncToGitSync();
       for (const client of clients) {
         for (const [, player] of client.lavalink?.players || []) {
           await player.destroy(`Process ${signal} shutdown`).catch(() => {});

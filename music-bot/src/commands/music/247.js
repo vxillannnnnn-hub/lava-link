@@ -39,7 +39,7 @@ module.exports = {
       }
 
       // 1. Permanently save to SQLite and JSON mirror
-      db.set247(interaction.guildId, true, targetVC.id, interaction.channelId);
+      db.set247(interaction.guildId, true, targetVC.id, interaction.channelId, client.user.id);
 
       // 2. Create or connect player instance
       if (!player) {
@@ -74,7 +74,7 @@ module.exports = {
       );
     } else {
       // Disable 24/7 mode in database
-      db.set247(interaction.guildId, false, null, null);
+      db.set247(interaction.guildId, false, null, null, null);
 
       if (player) {
         player.set("247", false);

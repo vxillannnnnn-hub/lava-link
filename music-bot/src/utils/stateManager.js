@@ -35,9 +35,9 @@ class StateManager {
 
   /**
    * Save current active player sessions and queues to disk & ensure WAL is checkpointed
-   * @param {import("discord.js").Client} client 
+   * @param {import("discord.js").Client | import("discord.js").Client[]} [clientOrClients] 
    */
-  saveState(client) {
+  saveState(clientOrClients) {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -47,45 +47,51 @@ class StateManager {
       db.checkpoint();
       db.exportJson();
 
-      if (!client?.lavalink?.players) {
-        return 0;
-      }
+      const multiBotCoordinator = require("./multiBotCoordinator");
+      const clientList = Array.isArray(clientOrClients)
+        ? clientOrClients
+        : (clientOrClients ? [clientOrClients] : (multiBotCoordinator.clients || []));
 
       const sessions = [];
 
-      for (const [guildId, player] of client.lavalink.players.entries()) {
-        if (!player || !player.voiceChannelId) continue;
+      for (const client of clientList) {
+        if (!client?.lavalink?.players) continue;
 
-        const is247 = Boolean(player.get("247"));
+        for (const [guildId, player] of client.lavalink.players.entries()) {
+          if (!player || !player.voiceChannelId) continue;
 
-        // Only save sessions that have an active track, upcoming queue, OR are in 24/7 mode
-        if (!player.queue.current && player.queue.tracks.length === 0 && !is247) continue;
+          const is247 = Boolean(player.get("247"));
 
-        const currentTrack = player.queue.current ? {
-          encoded: player.queue.current.encoded,
-          info: player.queue.current.info,
-          requester: player.queue.current.requester,
-        } : null;
+          // Only save sessions that have an active track, upcoming queue, OR are in 24/7 mode
+          if (!player.queue?.current && (!player.queue?.tracks || player.queue.tracks.length === 0) && !is247) continue;
 
-        const queueTracks = player.queue.tracks.map((t) => ({
-          encoded: t.encoded,
-          info: t.info,
-          requester: t.requester,
-        }));
+          const currentTrack = player.queue?.current ? {
+            encoded: player.queue.current.encoded,
+            info: player.queue.current.info,
+            requester: player.queue.current.requester,
+          } : null;
 
-        sessions.push({
-          guildId,
-          voiceChannelId: player.voiceChannelId,
-          textChannelId: player.textChannelId,
-          position: player.position || 0,
-          paused: Boolean(player.paused),
-          volume: player.volume || 100,
-          repeatMode: player.repeatMode || "off",
-          autoplay: Boolean(player.get("autoplay")),
-          is247,
-          currentTrack,
-          queue: queueTracks,
-        });
+          const queueTracks = (player.queue?.tracks || []).map((t) => ({
+            encoded: t.encoded,
+            info: t.info,
+            requester: t.requester,
+          }));
+
+          sessions.push({
+            guildId,
+            botUserId: client.user?.id || null,
+            voiceChannelId: player.voiceChannelId,
+            textChannelId: player.textChannelId,
+            position: player.position || 0,
+            paused: Boolean(player.paused),
+            volume: player.volume || 100,
+            repeatMode: player.repeatMode || "off",
+            autoplay: Boolean(player.get("autoplay")),
+            is247,
+            currentTrack,
+            queue: queueTracks,
+          });
+        }
       }
 
       const payload = {
@@ -97,7 +103,7 @@ class StateManager {
       fs.writeFileSync(STATE_FILE, JSON.stringify(payload, null, 2), "utf8");
 
       if (sessions.length > 0) {
-        logger.info(`[StateManager] Saved ${sessions.length} active voice session(s) to disk.`);
+        logger.info(`[StateManager] Saved ${sessions.length} active voice session(s) across fleet to disk.`);
       }
 
       return sessions.length;
@@ -171,6 +177,11 @@ class StateManager {
 
       for (const session of data.sessions) {
         try {
+          // If this session belonged to a specific bot in the fleet, let only that bot restore it
+          if (session.botUserId && client.user?.id && session.botUserId !== client.user.id) {
+            continue;
+          }
+
           const guild = client.guilds.cache.get(session.guildId) || await client.guilds.fetch(session.guildId).catch(() => null);
           if (!guild) continue;
 
@@ -269,9 +280,9 @@ class StateManager {
   initGracefulPersistence(client) {
     if (this.intervalId) return;
 
-    // 1. Recurring 60-second snapshot
+    // 1. Recurring 60-second snapshot across all fleet bots
     this.intervalId = setInterval(() => {
-      this.saveState(client);
+      this.saveState();
     }, 60000);
 
     // 2. Periodic 3-minute Git sync if dirty in GitHub Actions
@@ -292,7 +303,7 @@ class StateManager {
     // 3. Process exit handlers (SIGTERM / SIGINT)
     const onExit = (signal) => {
       logger.info(`[StateManager] Received ${signal}. Executing final database checkpoint, state snapshot & sync...`);
-      this.saveState(client);
+      this.saveState();
       this.syncToGitSync();
       process.exit(0);
     };

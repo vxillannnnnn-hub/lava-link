@@ -113,6 +113,9 @@ try {
 try {
   db.exec("ALTER TABLE guild_settings ADD COLUMN text_247_channel_id TEXT");
 } catch (_) {}
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN bot_247_user_id TEXT");
+} catch (_) {}
 
 // In-memory prefix cache for sub-microsecond command routing
 const prefixCache = new Map();
@@ -126,8 +129,8 @@ const stmts = {
     INSERT INTO guild_settings (
       guild_id, prefix, request_channel_id, request_message_id,
       dj_role_id, dj_enabled, auto_pause_enabled, stage_auto_speaker,
-      mode_247, voice_247_channel_id, text_247_channel_id, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      mode_247, voice_247_channel_id, text_247_channel_id, bot_247_user_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       prefix = coalesce(excluded.prefix, guild_settings.prefix),
       request_channel_id = coalesce(excluded.request_channel_id, guild_settings.request_channel_id),
@@ -139,6 +142,7 @@ const stmts = {
       mode_247 = excluded.mode_247,
       voice_247_channel_id = excluded.voice_247_channel_id,
       text_247_channel_id = excluded.text_247_channel_id,
+      bot_247_user_id = coalesce(excluded.bot_247_user_id, guild_settings.bot_247_user_id),
       updated_at = excluded.updated_at
   `),
   setPrefix: db.prepare(`
@@ -170,19 +174,20 @@ const stmts = {
       updated_at = excluded.updated_at
   `),
   set247: db.prepare(`
-    INSERT INTO guild_settings (guild_id, mode_247, voice_247_channel_id, text_247_channel_id, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO guild_settings (guild_id, mode_247, voice_247_channel_id, text_247_channel_id, bot_247_user_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       mode_247 = excluded.mode_247,
       voice_247_channel_id = excluded.voice_247_channel_id,
       text_247_channel_id = excluded.text_247_channel_id,
+      bot_247_user_id = excluded.bot_247_user_id,
       updated_at = excluded.updated_at
   `),
   get247: db.prepare(`
-    SELECT mode_247, voice_247_channel_id, text_247_channel_id FROM guild_settings WHERE guild_id = ?
+    SELECT mode_247, voice_247_channel_id, text_247_channel_id, bot_247_user_id FROM guild_settings WHERE guild_id = ?
   `),
   getAll247Guilds: db.prepare(`
-    SELECT guild_id, voice_247_channel_id, text_247_channel_id FROM guild_settings
+    SELECT guild_id, voice_247_channel_id, text_247_channel_id, bot_247_user_id FROM guild_settings
     WHERE mode_247 = 1 AND voice_247_channel_id IS NOT NULL
   `),
   getAllPlaylistsWithTracks: db.prepare(`
@@ -281,6 +286,7 @@ function exportJson() {
         mode_247: Boolean(g.mode_247),
         voice_247_channel_id: g.voice_247_channel_id || null,
         text_247_channel_id: g.text_247_channel_id || null,
+        bot_247_user_id: g.bot_247_user_id || null,
         updated_at: g.updated_at || Date.now(),
       };
     }
@@ -354,6 +360,7 @@ function syncDualStorage() {
               data.mode_247 ? 1 : 0,
               data.voice_247_channel_id || null,
               data.text_247_channel_id || null,
+              data.bot_247_user_id || null,
               data.updated_at || Date.now()
             );
             prefixCache.set(guildId, data.prefix || ".");
@@ -494,13 +501,14 @@ module.exports = {
     return res;
   },
 
-  set247(guildId, enabled, voiceChannelId = null, textChannelId = null) {
+  set247(guildId, enabled, voiceChannelId = null, textChannelId = null, botUserId = null) {
     try {
       const res = stmts.set247.run(
         guildId,
         enabled ? 1 : 0,
         enabled ? voiceChannelId : null,
         enabled ? textChannelId : null,
+        enabled ? botUserId : null,
         Date.now()
       );
       checkpoint();
@@ -520,10 +528,11 @@ module.exports = {
         enabled: Boolean(row?.mode_247),
         voiceChannelId: row?.voice_247_channel_id || null,
         textChannelId: row?.text_247_channel_id || null,
+        botUserId: row?.bot_247_user_id || null,
       };
     } catch (err) {
       logger.error(`[Database] Failed to get 24/7 settings for guild ${guildId}:`, err.message);
-      return { enabled: false, voiceChannelId: null, textChannelId: null };
+      return { enabled: false, voiceChannelId: null, textChannelId: null, botUserId: null };
     }
   },
 

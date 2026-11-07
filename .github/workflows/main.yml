@@ -435,6 +435,8 @@ jobs:
           LAVALINK_SECURE: ${{ secrets.LAVALINK_SECURE || env.PARSED_SECURE }}
           AUTO_MAXIMIZE_BITRATE: "true"
           RUNNER_LIFETIME_MS: "19800000"
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
         run: |
           if [ -z "$DISCORD_TOKEN" ] && [ -z "$DISCORD_TOKENS" ]; then
             echo "::error::Neither DISCORD_TOKEN nor DISCORD_TOKENS secret is configured! Please configure bot token(s) in repository secrets."

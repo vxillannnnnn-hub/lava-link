@@ -3,6 +3,7 @@ const db = require("../database/db");
 const config = require("../config");
 const audioOptimizer = require("./audioOptimizer");
 const voiceStatusManager = require("./voiceStatusManager");
+const multiBotCoordinator = require("./multiBotCoordinator");
 
 // Guard to prevent concurrent reconnect loops
 let isReconnecting = false;
@@ -33,6 +34,50 @@ async function reconnect247(client) {
         if (!voiceChannel) {
           logger.debug(`[24/7 Engine] Voice channel ${row.voice_247_channel_id} not found in ${guild.name}`);
           continue;
+        }
+
+        // ---------------------------------------------------------------------
+        // Fleet Arbitration for 24/7 Voice Channels:
+        // ---------------------------------------------------------------------
+        // 1. Check if another bot from our fleet is ALREADY connected in this voice channel
+        const isFleetBotConnected = (multiBotCoordinator.allBotIds || []).some((botId) => {
+          if (botId === client.user.id) return false;
+          const vs = guild.voiceStates.cache.get(botId);
+          return vs && vs.channelId === row.voice_247_channel_id;
+        });
+
+        if (isFleetBotConnected) {
+          // Another fleet clone is already holding this 24/7 voice channel
+          continue;
+        }
+
+        // 2. If a specific bot was assigned to 24/7 for this guild, ensure that bot handles it
+        if (row.bot_247_user_id) {
+          if (row.bot_247_user_id !== client.user.id) {
+            // Check if the assigned bot is actually present in this guild
+            const assignedBotPresent = (multiBotCoordinator.clients || []).some(
+              (c) => c.user?.id === row.bot_247_user_id && c.guilds.cache.has(row.guild_id)
+            );
+            if (assignedBotPresent) {
+              // The assigned bot is in the fleet and present in this guild, let it reconnect
+              continue;
+            }
+            // If the assigned bot is not present in this guild, fallback to lowest index bot
+            const botsInGuild = (multiBotCoordinator.clients || [])
+              .filter((c) => c.user?.id && c.guilds.cache.has(row.guild_id))
+              .sort((a, b) => (a.botIndex ?? 0) - (b.botIndex ?? 0));
+            if (botsInGuild[0] && botsInGuild[0].user.id !== client.user.id) {
+              continue;
+            }
+          }
+        } else {
+          // No specific bot assigned: lowest-indexed bot present in this guild takes ownership
+          const botsInGuild = (multiBotCoordinator.clients || [])
+            .filter((c) => c.user?.id && c.guilds.cache.has(row.guild_id))
+            .sort((a, b) => (a.botIndex ?? 0) - (b.botIndex ?? 0));
+          if (botsInGuild[0] && botsInGuild[0].user.id !== client.user.id) {
+            continue;
+          }
         }
 
         let player = client.lavalink.getPlayer(row.guild_id);
