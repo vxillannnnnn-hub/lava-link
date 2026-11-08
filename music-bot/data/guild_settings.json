@@ -35,11 +35,11 @@
     "dj_enabled": false,
     "auto_pause_enabled": true,
     "stage_auto_speaker": true,
-    "mode_247": true,
-    "voice_247_channel_id": "1524739599082066115",
-    "text_247_channel_id": "1524739598935396421",
-    "bot_247_user_id": "1568539143032668180",
-    "updated_at": 1794069481513
+    "mode_247": false,
+    "voice_247_channel_id": null,
+    "text_247_channel_id": null,
+    "bot_247_user_id": null,
+    "updated_at": 1794082863225
   },
   "1555968929023664208": {
     "prefix": ".",
