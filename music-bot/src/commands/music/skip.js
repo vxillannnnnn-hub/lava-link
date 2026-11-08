@@ -32,7 +32,14 @@ module.exports = {
         return interaction.reply(errorText(`Invalid track number! Must be between 1 and ${player.queue.tracks.length}.`));
       }
 
+      const targetTrack = player.queue.tracks[jumpTo - 1];
       player.queue.tracks.splice(0, jumpTo - 1);
+      const voiceStatusManager = require("../../utils/voiceStatusManager");
+      if (targetTrack) {
+        voiceStatusManager.onTrackStart(client, player, targetTrack);
+      } else if (!player.get("autoplay")) {
+        voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
+      }
       await player.skip();
 
       const nextTrack = player.queue.tracks[0];
@@ -49,6 +56,12 @@ module.exports = {
     }
 
     const nextTrack = player.queue.tracks[0];
+    const voiceStatusManager = require("../../utils/voiceStatusManager");
+    if (nextTrack) {
+      voiceStatusManager.onTrackStart(client, player, nextTrack);
+    } else if (!player.get("autoplay")) {
+      voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
+    }
     await player.skip();
 
     const sub = nextTrack

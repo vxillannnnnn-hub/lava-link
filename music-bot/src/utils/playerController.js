@@ -609,6 +609,12 @@ async function handlePlayerButton(interaction, client) {
     case "btn_skip": {
       if (!checkDJ(true)) return;
       const currentTitle = player.queue.current?.info?.title || "current track";
+      const nextTrack = player.queue.tracks[0];
+      if (nextTrack) {
+        voiceStatusManager.onTrackStart(client, player, nextTrack);
+      } else if (!player.get("autoplay")) {
+        voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
+      }
       await player.skip();
       await interaction.reply({
         content: `${emojis.skip} Skipped **${truncate(currentTitle, 45)}**`,
@@ -628,6 +634,7 @@ async function handlePlayerButton(interaction, client) {
           allowedMentions: { parse: [], users: [] },
         });
       }
+      voiceStatusManager.onTrackStart(client, player, prevTrack);
       await player.play({ track: prevTrack });
       await interaction.reply({
         content: `${emojis.previous} Playing previous: **${truncate(prevTrack.info.title, 45)}**`,
@@ -951,12 +958,23 @@ async function handlePlayerButton(interaction, client) {
     case "btn_stop": {
       if (!checkDJ(false)) return;
       player.queue.tracks.splice(0, player.queue.tracks.length);
-      await player.destroy("User pressed Stop button");
-      await interaction.reply({
-        content: `${emojis.stop} Playback stopped, queue cleared, and disconnected from voice channel.`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
+      const vcId = player.voiceChannelId;
+      if (player.get("247")) {
+        await player.stop().catch(() => {});
+        voiceStatusManager.setIdleVoiceStatus(client, vcId, player.guildId);
+        await interaction.reply({
+          content: `${emojis.stop} Playback stopped and queue cleared (24/7 Mode Active).`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      } else {
+        await player.destroy("User pressed Stop button");
+        await interaction.reply({
+          content: `${emojis.stop} Playback stopped, queue cleared, and disconnected from voice channel.`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
       break;
     }
 

@@ -191,6 +191,9 @@ async function handleSongRequestMessage(message, client) {
       }
 
       if (!player.playing && !player.paused) {
+        const voiceStatusManager = require("./voiceStatusManager");
+        const nextTrack = res.tracks[0];
+        if (nextTrack) voiceStatusManager.onTrackStart(client, player, nextTrack);
         await player.play();
       } else {
         await updateRequestChannelDashboard(client, message.guild.id, player);

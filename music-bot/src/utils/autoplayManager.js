@@ -310,6 +310,11 @@ class AutoplayManager {
     player.queue.add(nextTrack);
     logger.info(`[Jockie Autoplay] Autoplaying "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId}`);
 
+    const voiceStatusManager = require("./voiceStatusManager");
+    if (player.voiceChannelId && nextTrack) {
+      voiceStatusManager.onTrackStart(player.lavalink?.client, player, nextTrack);
+    }
+
     // If NOT called inside lavalink-client's internal autoPlayFunction hook, trigger playback manually
     if (!isAutoPlayHook) {
       if (!player.playing) {

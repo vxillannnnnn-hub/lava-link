@@ -84,6 +84,7 @@ module.exports = {
     }
 
     // Auto-maximize channel bitrate to guild Nitro tier (up to 384 kbps)
+    player.set("lastVoiceChannelId", voiceChannel.id);
     audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
 
     // Fast resolution on Lavalink node
@@ -121,6 +122,8 @@ module.exports = {
         const willPlayNow = !player.playing && !player.paused;
 
         if (willPlayNow) {
+          const voiceStatusManager = require("../../utils/voiceStatusManager");
+          if (track) voiceStatusManager.onTrackStart(client, player, track);
           await player.play();
         }
 
@@ -157,6 +160,8 @@ module.exports = {
         const willPlayNow = !player.playing && !player.paused;
 
         if (willPlayNow) {
+          const voiceStatusManager = require("../../utils/voiceStatusManager");
+          if (tracks[0]) voiceStatusManager.onTrackStart(client, player, tracks[0]);
           await player.play();
         }
 
@@ -186,6 +191,8 @@ module.exports = {
         if (track) {
           player.queue.add(track);
           if (!player.playing && !player.paused) {
+            const voiceStatusManager = require("../../utils/voiceStatusManager");
+            voiceStatusManager.onTrackStart(client, player, track);
             await player.play();
           }
           const cleanTitle = truncate(cleanTrackTitle(track.info.title), 42);

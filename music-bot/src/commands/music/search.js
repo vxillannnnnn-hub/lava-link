@@ -224,6 +224,8 @@ module.exports = {
     player.queue.add(chosenTrack);
 
     if (!player.playing && !player.paused) {
+      const voiceStatusManager = require("../../utils/voiceStatusManager");
+      voiceStatusManager.onTrackStart(client, player, chosenTrack);
       await player.play();
     }
 

@@ -241,6 +241,7 @@ function initLavalink(client) {
 
     // Auto-maximize voice channel bitrate for studio-grade audio fidelity
     if (player.voiceChannelId) {
+      player.set("lastVoiceChannelId", player.voiceChannelId);
       const vc = client.channels.cache.get(player.voiceChannelId);
       if (vc) audioOptimizer.maximizeVoiceBitrate(vc, client);
     }
@@ -267,8 +268,11 @@ function initLavalink(client) {
   manager.on("trackEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
     stopRealtimeProgressLoop(player);
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
-    const hasNext = (player.queue?.tracks?.length || 0) > 0 || Boolean(player.get("autoplay"));
-    if (!hasNext) {
+    const nextTrack = player.queue?.tracks?.[0];
+    const hasNext = Boolean(nextTrack) || Boolean(player.get("autoplay"));
+    if (nextTrack) {
+      voiceStatusManager.onTrackStart(client, player, nextTrack);
+    } else if (!hasNext) {
       voiceStatusManager.onTrackEnd(client, player);
     }
     presenceManager.onTrackEnd(client);
@@ -371,7 +375,8 @@ function initLavalink(client) {
     player.set("ownerId", null);
     logger.debug(`Player destroyed for guild ${player.guildId}`);
     updateRequestChannelDashboard(client, player.guildId, null);
-    voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
+    const targetVC = player.voiceChannelId || player.get("lastVoiceChannelId");
+    voiceStatusManager.clearVoiceStatus(client, targetVC, player.guildId);
     presenceManager.onTrackEnd(client);
     const prevMsgId = player.get("nowPlayingMsgId");
     if (prevMsgId && player.textChannelId) {

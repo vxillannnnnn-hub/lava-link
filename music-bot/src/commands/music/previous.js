@@ -20,6 +20,8 @@ module.exports = {
       return interaction.reply(errorText("No previous track found in the session history buffer."));
     }
 
+    const voiceStatusManager = require("../../utils/voiceStatusManager");
+    voiceStatusManager.onTrackStart(client, player, previousTrack);
     await player.play({ track: previousTrack });
     const title = truncate(cleanTrackTitle(previousTrack.info.title), 40);
     const author = truncate(previousTrack.info.author, 24);
