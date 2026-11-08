@@ -58,13 +58,13 @@ module.exports = {
         return;
       }
 
-      // Handle bot moved between voice channels
-      if (oldState.id === client.user.id && newState.channelId && oldState.channelId !== newState.channelId) {
+      // Handle bot moved between voice channels (only when moved from an existing channel)
+      if (oldState.id === client.user.id && newState.channelId && oldState.channelId && oldState.channelId !== newState.channelId) {
         const voiceStatusManager = require("../../utils/voiceStatusManager");
         voiceStatusManager.clearVoiceStatus(client, oldState.channelId, guildId);
         if (player && player.playing && !player.paused && player.queue.current) {
           voiceStatusManager.onTrackStart(client, player, player.queue.current);
-        } else if (player) {
+        } else if (player && (!player.queue?.current && !player.playing)) {
           voiceStatusManager.setIdleVoiceStatus(client, newState.channelId, guildId);
         }
       }

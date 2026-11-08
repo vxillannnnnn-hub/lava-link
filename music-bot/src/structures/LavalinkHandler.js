@@ -267,7 +267,10 @@ function initLavalink(client) {
   manager.on("trackEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
     stopRealtimeProgressLoop(player);
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
-    voiceStatusManager.onTrackEnd(client, player);
+    const hasNext = (player.queue?.tracks?.length || 0) > 0 || Boolean(player.get("autoplay"));
+    if (!hasNext) {
+      voiceStatusManager.onTrackEnd(client, player);
+    }
     presenceManager.onTrackEnd(client);
   })));
 

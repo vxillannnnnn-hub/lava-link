@@ -45,13 +45,16 @@ const DEFAULT_IDLE_TEMPLATES = [
   "24/7 Studio Sound • Type /play or {prefix}p",
 ];
 
-// Active interval rotation timers mapped by guildId
+// Active interval rotation timers mapped by voiceChannelId
 const activeTimers = new Map();
+
+// Pending cooldown timers mapped by voiceChannelId (guarantees updates are never dropped)
+const pendingUpdateTimers = new Map();
 
 // In-memory cache of current status per voiceChannelId to avoid redundant REST requests
 const channelStatusCache = new Map();
 
-// Current rotating template index by guildId (track vs idle)
+// Current rotating template index by voiceChannelId
 const templateIndices = new Map();
 const idleTemplateIndices = new Map();
 
@@ -127,12 +130,14 @@ function formatStatusString(template, track) {
 
 /**
  * Send Voice Channel Status update via Discord REST API
+ * Guarantees priority updates (such as new songs starting) are never dropped.
  * @param {import("discord.js").Client} client 
  * @param {string} voiceChannelId 
  * @param {string} statusText 
+ * @param {boolean} [isPriority=false] 
  * @returns {Promise<boolean>}
  */
-async function setChannelStatus(client, voiceChannelId, statusText) {
+async function setChannelStatus(client, voiceChannelId, statusText, isPriority = false) {
   if (!client || !voiceChannelId) return false;
 
   const currentCached = channelStatusCache.get(voiceChannelId);
@@ -142,8 +147,24 @@ async function setChannelStatus(client, voiceChannelId, statusText) {
 
   const now = Date.now();
   const lastUpdate = lastUpdateTimes.get(voiceChannelId) || 0;
-  if (now - lastUpdate < MIN_UPDATE_COOLDOWN_MS) {
-    return false; // In cooldown, avoid spamming Discord
+  const elapsed = now - lastUpdate;
+
+  // Clear any pending queued update for this channel
+  if (pendingUpdateTimers.has(voiceChannelId)) {
+    clearTimeout(pendingUpdateTimers.get(voiceChannelId));
+    pendingUpdateTimers.delete(voiceChannelId);
+  }
+
+  // If in rate-limit cooldown, queue to fire automatically when cooldown expires
+  if (elapsed < MIN_UPDATE_COOLDOWN_MS) {
+    const delay = Math.max(100, MIN_UPDATE_COOLDOWN_MS - elapsed + 50);
+    const timer = setTimeout(async () => {
+      pendingUpdateTimers.delete(voiceChannelId);
+      await setChannelStatus(client, voiceChannelId, statusText, isPriority);
+    }, delay);
+    if (timer.unref) timer.unref();
+    pendingUpdateTimers.set(voiceChannelId, timer);
+    return true;
   }
 
   lastUpdateTimes.set(voiceChannelId, now);
@@ -153,13 +174,18 @@ async function setChannelStatus(client, voiceChannelId, statusText) {
       body: { status: statusText || "" },
     });
     channelStatusCache.set(voiceChannelId, statusText || "");
-    logger.debug(`[VC Status] Updated VC ${voiceChannelId} -> "${statusText}"`);
+    logger.info(`[VC Status] ✅ Updated VC <#${voiceChannelId}> -> "${statusText}"`);
     return true;
   } catch (err) {
     if (err.status === 403) {
       logger.debug(`[VC Status] Missing permission SET_VOICE_CHANNEL_STATUS in channel ${voiceChannelId}`);
     } else if (err.status === 429) {
-      logger.warn(`[VC Status] Rate limited updating status on channel ${voiceChannelId}`);
+      logger.warn(`[VC Status] Rate limited updating status on channel ${voiceChannelId}, retrying in 5s...`);
+      const retryTimer = setTimeout(() => {
+        setChannelStatus(client, voiceChannelId, statusText, true);
+      }, 5000);
+      if (retryTimer.unref) retryTimer.unref();
+      pendingUpdateTimers.set(voiceChannelId, retryTimer);
     } else {
       logger.debug(`[VC Status] Failed to update VC status on ${voiceChannelId}:`, err.message);
     }
@@ -174,49 +200,58 @@ async function setChannelStatus(client, voiceChannelId, statusText) {
  * @param {object} track 
  */
 function startRotation(client, player, track) {
-  const guildId = player.guildId;
   const voiceChannelId = player.voiceChannelId;
   if (!voiceChannelId) return;
 
-  // Clear any existing rotation for this guild
-  stopRotation(guildId);
+  // Clear any existing rotation or idle timer for this voice channel
+  stopRotation(voiceChannelId);
 
   const templates = config.voiceStatus?.templates || DEFAULT_TEMPLATES;
-  let currentIndex = templateIndices.get(guildId) || 0;
+  let currentIndex = templateIndices.get(voiceChannelId) || 0;
 
-  // Immediately render and apply the active template
+  // Immediately render and apply the active template with priority = true
   const initialText = formatStatusString(templates[currentIndex % templates.length], track);
-  setChannelStatus(client, voiceChannelId, initialText);
+  setChannelStatus(client, voiceChannelId, initialText, true);
 
   // Schedule template rotation while the song plays
   const rotateInterval = config.voiceStatus?.rotateIntervalMs || 35000;
   const timer = setInterval(() => {
-    const activePlayer = client.lavalink?.getPlayer(guildId);
+    const activePlayer = client.lavalink?.getPlayer(player.guildId);
     if (!activePlayer || !activePlayer.playing || activePlayer.paused || !activePlayer.voiceChannelId) {
+      stopRotation(voiceChannelId);
       return;
     }
 
     const currentTrack = activePlayer.queue.current;
-    if (!currentTrack) return;
+    if (!currentTrack) {
+      stopRotation(voiceChannelId);
+      return;
+    }
 
     currentIndex = (currentIndex + 1) % templates.length;
-    templateIndices.set(guildId, currentIndex);
+    templateIndices.set(voiceChannelId, currentIndex);
 
     const rotatedText = formatStatusString(templates[currentIndex], currentTrack);
-    setChannelStatus(client, activePlayer.voiceChannelId, rotatedText);
+    setChannelStatus(client, activePlayer.voiceChannelId, rotatedText, false);
   }, rotateInterval);
 
-  activeTimers.set(guildId, timer);
+  if (timer.unref) timer.unref();
+  activeTimers.set(voiceChannelId, timer);
 }
 
 /**
- * Stop rotation timer for a guild
- * @param {string} guildId 
+ * Stop rotation timer for a voice channel
+ * @param {string} voiceChannelId 
  */
-function stopRotation(guildId) {
-  if (activeTimers.has(guildId)) {
-    clearInterval(activeTimers.get(guildId));
-    activeTimers.delete(guildId);
+function stopRotation(voiceChannelId) {
+  if (!voiceChannelId) return;
+  if (activeTimers.has(voiceChannelId)) {
+    clearInterval(activeTimers.get(voiceChannelId));
+    activeTimers.delete(voiceChannelId);
+  }
+  if (pendingUpdateTimers.has(voiceChannelId)) {
+    clearTimeout(pendingUpdateTimers.get(voiceChannelId));
+    pendingUpdateTimers.delete(voiceChannelId);
   }
 }
 
@@ -225,13 +260,13 @@ function stopRotation(guildId) {
  */
 function onTrackStart(client, player, track) {
   if (config.voiceStatus?.enabled === false) return;
-  if (!player.voiceChannelId || !track) return;
+  if (!player?.voiceChannelId || !track) return;
 
-  const guildId = player.guildId;
+  const voiceChannelId = player.voiceChannelId;
   // Cycle to next template for each new track
-  const prevIndex = templateIndices.get(guildId) || 0;
+  const prevIndex = templateIndices.get(voiceChannelId) || 0;
   const nextIndex = (prevIndex + 1) % (config.voiceStatus?.templates?.length || DEFAULT_TEMPLATES.length);
-  templateIndices.set(guildId, nextIndex);
+  templateIndices.set(voiceChannelId, nextIndex);
 
   startRotation(client, player, track);
 }
@@ -244,16 +279,16 @@ function onPause(client, player) {
   const voiceChannelId = player.voiceChannelId;
   if (!voiceChannelId) return;
 
-  const track = player.queue.current;
+  const track = player.queue?.current;
   if (!track) return;
 
-  stopRotation(player.guildId);
+  stopRotation(voiceChannelId);
 
   const rawTitle = cleanTrackTitle(track.info.title) || track.info.title;
   const cleanTitle = truncate(rawTitle, 45);
   const cleanAuthor = truncate(track.info.author, 30);
   const pausedText = `Paused: ${cleanTitle} by - ${cleanAuthor}`;
-  setChannelStatus(client, voiceChannelId, pausedText);
+  setChannelStatus(client, voiceChannelId, pausedText, true);
 }
 
 /**
@@ -261,7 +296,7 @@ function onPause(client, player) {
  */
 function onResume(client, player) {
   if (config.voiceStatus?.enabled === false) return;
-  const track = player.queue.current;
+  const track = player.queue?.current;
   if (!track) return;
 
   startRotation(client, player, track);
@@ -277,49 +312,65 @@ function setIdleVoiceStatus(client, voiceChannelId, guildId) {
   if (config.voiceStatus?.enabled === false) return;
   if (!client || !voiceChannelId || !guildId) return;
 
-  // Clear any existing track or idle rotation timer
-  stopRotation(guildId);
+  // Active Player Safety: If audio is currently playing in this channel, NEVER set idle status!
+  const activePlayer = client.lavalink?.getPlayer(guildId);
+  if (activePlayer && (activePlayer.playing || activePlayer.queue?.current) && activePlayer.voiceChannelId === voiceChannelId) {
+    logger.debug(`[VC Status] Skipping idle status because audio is currently playing in <#${voiceChannelId}>`);
+    if (activePlayer.queue?.current) {
+      startRotation(client, activePlayer, activePlayer.queue.current);
+    }
+    return;
+  }
+
+  // Clear any existing rotation or idle timer for this voice channel
+  stopRotation(voiceChannelId);
 
   const idleTemplates = config.voiceStatus?.idleTemplates || DEFAULT_IDLE_TEMPLATES;
-  let currentIndex = idleTemplateIndices.get(guildId) ?? Math.floor(Math.random() * idleTemplates.length);
-  idleTemplateIndices.set(guildId, currentIndex);
+  let currentIndex = idleTemplateIndices.get(voiceChannelId) ?? Math.floor(Math.random() * idleTemplates.length);
+  idleTemplateIndices.set(voiceChannelId, currentIndex);
 
   const initialStatus = formatIdleStatus(idleTemplates[currentIndex % idleTemplates.length], guildId);
-  setChannelStatus(client, voiceChannelId, initialStatus);
+  setChannelStatus(client, voiceChannelId, initialStatus, false);
 
   // Continuous rotation for idle status
   const rotateInterval = config.voiceStatus?.rotateIntervalMs || 35000;
   const timer = setInterval(() => {
-    // If bot has started playing a track, cancel idle rotation
-    const activePlayer = client.lavalink?.getPlayer(guildId);
-    if (activePlayer && activePlayer.playing && !activePlayer.paused && activePlayer.queue.current) {
-      stopRotation(guildId);
+    // If bot has started playing a track, switch immediately to track rotation
+    const p = client.lavalink?.getPlayer(guildId);
+    if (p && p.playing && !p.paused && p.queue.current && p.voiceChannelId === voiceChannelId) {
+      stopRotation(voiceChannelId);
+      startRotation(client, p, p.queue.current);
       return;
     }
 
     // Verify bot is still in this voice channel
-    const currentVCId = activePlayer?.voiceChannelId || client.guilds.cache.get(guildId)?.members.me?.voice.channelId;
-    if (!currentVCId) {
-      stopRotation(guildId);
+    const currentVCId = p?.voiceChannelId || client.guilds.cache.get(guildId)?.members.me?.voice.channelId;
+    if (!currentVCId || currentVCId !== voiceChannelId) {
+      stopRotation(voiceChannelId);
       return;
     }
 
     currentIndex = (currentIndex + 1) % idleTemplates.length;
-    idleTemplateIndices.set(guildId, currentIndex);
+    idleTemplateIndices.set(voiceChannelId, currentIndex);
 
     const rotatedStatus = formatIdleStatus(idleTemplates[currentIndex], guildId);
-    setChannelStatus(client, currentVCId, rotatedStatus);
+    setChannelStatus(client, currentVCId, rotatedStatus, false);
   }, rotateInterval);
 
-  activeTimers.set(guildId, timer);
+  if (timer.unref) timer.unref();
+  activeTimers.set(voiceChannelId, timer);
 }
 
 /**
  * Track End Hook
  */
 function onTrackEnd(client, player) {
-  stopRotation(player.guildId);
-  if (player.voiceChannelId) {
+  if (!player?.voiceChannelId) return;
+  stopRotation(player.voiceChannelId);
+
+  // Only set idle status if queue is empty and autoplay is not active
+  const hasNext = (player.queue?.tracks?.length || 0) > 0 || Boolean(player.get("autoplay"));
+  if (!hasNext) {
     setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
   }
 }
@@ -331,21 +382,21 @@ function onTrackEnd(client, player) {
  * @param {string} [guildId] 
  */
 async function clearVoiceStatus(client, voiceChannelId, guildId) {
-  if (guildId) {
-    stopRotation(guildId);
-    idleTemplateIndices.delete(guildId);
-    templateIndices.delete(guildId);
-  }
-  if (!voiceChannelId) return;
+  if (voiceChannelId) {
+    stopRotation(voiceChannelId);
+    idleTemplateIndices.delete(voiceChannelId);
+    templateIndices.delete(voiceChannelId);
+    channelStatusCache.delete(voiceChannelId);
+    lastUpdateTimes.delete(voiceChannelId);
 
-  channelStatusCache.delete(voiceChannelId);
-  try {
-    await client.rest.put(`/channels/${voiceChannelId}/voice-status`, {
-      body: { status: "" },
-    });
-    logger.debug(`[VC Status] Cleared voice status for channel ${voiceChannelId}`);
-  } catch (err) {
-    logger.debug(`[VC Status] Failed to clear status for channel ${voiceChannelId}:`, err.message);
+    try {
+      await client.rest.put(`/channels/${voiceChannelId}/voice-status`, {
+        body: { status: "" },
+      });
+      logger.debug(`[VC Status] Cleared voice status for channel ${voiceChannelId}`);
+    } catch (err) {
+      logger.debug(`[VC Status] Failed to clear status for channel ${voiceChannelId}:`, err.message);
+    }
   }
 }
 
