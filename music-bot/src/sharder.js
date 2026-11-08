@@ -3,15 +3,13 @@ const { ShardingManager } = require("discord.js");
 const path = require("path");
 const logger = require("./utils/logger");
 
-// Global error handlers to prevent segfaults from crashing silently
+// Global error handlers to keep 24/7 runner alive and monitor issues cleanly
 process.on("uncaughtException", (error) => {
-  logger.error("🚨 FATAL: Uncaught Exception:", error?.stack || error);
-  process.exit(1);
+  logger.error("[Process] Uncaught Exception:", error?.stack || error);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  logger.error("🚨 FATAL: Unhandled Promise Rejection at:", promise, "reason:", reason?.stack || reason);
-  process.exit(1);
+  logger.error("[Process] Unhandled Promise Rejection:", reason?.stack || reason);
 });
 
 const BANNER = `
@@ -89,14 +87,6 @@ if (tokens.length > 1) {
     multiBotCoordinator.registerClient(client);
     clients.push(client);
   }
-
-  process.on("unhandledRejection", (reason) => {
-    logger.error("Unhandled Promise Rejection:", reason?.stack || reason);
-  });
-
-  process.on("uncaughtException", (error) => {
-    logger.error("Uncaught Process Exception:", error?.stack || error);
-  });
 
   const cleanup = async (signal) => {
     logger.info(`Received ${signal}. Shutting down all ${clients.length} multi-bot instance(s) cleanly...`);

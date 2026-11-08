@@ -145,12 +145,12 @@ class StateManager {
    * @param {import("discord.js").Client} client 
    */
   async restoreState(client) {
-    if (this.isRestoring) return;
-    this.isRestoring = true;
+    if (!this.restoringClients) this.restoringClients = new Set();
+    if (!client?.user?.id || this.restoringClients.has(client.user.id)) return;
+    this.restoringClients.add(client.user.id);
 
     try {
       if (!fs.existsSync(STATE_FILE)) {
-        this.isRestoring = false;
         return;
       }
 
@@ -158,7 +158,6 @@ class StateManager {
       const data = JSON.parse(raw);
 
       if (!data || !Array.isArray(data.sessions) || data.sessions.length === 0) {
-        this.isRestoring = false;
         return;
       }
 
@@ -260,16 +259,24 @@ class StateManager {
         }
       }
 
-      logger.info(`[StateManager] Successfully restored ${restoredCount}/${data.sessions.length} voice session(s)!`);
+      logger.info(`[StateManager] Successfully restored ${restoredCount}/${data.sessions.length} voice session(s) for ${client.user?.username}!`);
 
-      // Clean up snapshot once restored to prevent re-triggering
-      try {
-        if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE);
-      } catch (_) {}
+      if (!this.restoredBots) this.restoredBots = new Set();
+      if (client.user?.id) this.restoredBots.add(client.user.id);
+
+      const multiBotCoordinator = require("./multiBotCoordinator");
+      const totalBots = multiBotCoordinator.clients?.length || 1;
+
+      // Only delete snapshot after all fleet instances have restored their sessions
+      if (this.restoredBots.size >= totalBots) {
+        try {
+          if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE);
+        } catch (_) {}
+      }
     } catch (err) {
       logger.error("[StateManager] Error during state restoration:", err.message);
     } finally {
-      this.isRestoring = false;
+      if (client.user?.id) this.restoringClients.delete(client.user.id);
     }
   }
 

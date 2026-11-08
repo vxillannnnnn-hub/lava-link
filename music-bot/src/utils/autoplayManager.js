@@ -313,7 +313,12 @@ class AutoplayManager {
     // If NOT called inside lavalink-client's internal autoPlayFunction hook, trigger playback manually
     if (!isAutoPlayHook) {
       if (!player.playing) {
-        await player.play();
+        try {
+          await player.play();
+        } catch (err) {
+          logger.error(`[Jockie Autoplay] Failed to play track for guild ${player.guildId}:`, err?.message || err);
+          return false;
+        }
       }
     }
 

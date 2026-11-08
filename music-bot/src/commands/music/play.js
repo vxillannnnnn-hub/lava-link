@@ -49,7 +49,7 @@ module.exports = {
     }
 
     const me = interaction.guild.members.me;
-    const permissions = voiceChannel.permissionsFor(me);
+    const permissions = voiceChannel.permissionsFor(me || client.user.id);
     if (!permissions?.has(PermissionFlagsBits.Connect)) {
       return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
     }
@@ -77,6 +77,10 @@ module.exports = {
 
     if (!player.connected) {
       await player.connect();
+    }
+
+    if (!player.get("ownerId")) {
+      player.set("ownerId", interaction.user?.id || interaction.author?.id);
     }
 
     // Auto-maximize channel bitrate to guild Nitro tier (up to 384 kbps)
@@ -132,7 +136,7 @@ module.exports = {
               theme.badge || emojis.music,
               `Now playing [**${cleanTitle}**](${uri}) by **${cleanAuthor}**`,
               `${theme.name} • \`${duration}\` • Requested by <@${interaction.user.id}>`,
-              { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Primary }
+              { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Secondary }
             )
           );
         }

@@ -32,12 +32,15 @@ class CommandContext {
       this.options = interaction.options;
     } else {
       // Determine if the command uses subcommands (e.g. .playlist create or .dj set)
-      const hasSubcommand = ["playlist", "dj", "autoplay"].includes(commandName?.toLowerCase());
+      const hasSubcommand = ["playlist", "dj", "autoplay", "settings", "config"].includes(commandName?.toLowerCase());
       const effectiveArgs = hasSubcommand ? this.args.slice(1) : this.args;
 
       this.options = {
-        getSubcommand: () => {
-          if (!this.args || this.args.length === 0) return null;
+        getSubcommand: (required = false) => {
+          if (!this.args || this.args.length === 0) {
+            if (required) return "view";
+            return null;
+          }
           return this.args[0].toLowerCase();
         },
         getSubcommandGroup: () => null,
@@ -52,7 +55,7 @@ class CommandContext {
             );
             return match ? match.toLowerCase() : null;
           }
-          if (name === "time" || name === "new" || name === "action") return effectiveArgs[0] || null;
+          if (name === "time" || name === "new" || name === "action" || name === "mode") return effectiveArgs[0] || null;
           return effectiveArgs.join(" ") || null;
         },
 

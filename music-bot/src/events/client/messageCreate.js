@@ -13,6 +13,13 @@ module.exports = {
     return runWithClient(client, async () => {
     if (!message || message.author?.bot || !message.guild) return;
 
+    // Pin active player now playing embed to bottom of channel if users send messages
+    const activePlayer = client.lavalink?.getPlayer(message.guild.id);
+    if (activePlayer && activePlayer.queue?.current && activePlayer.textChannelId === message.channel.id) {
+      const { keepDashboardAtBottom } = require("../../utils/playerController");
+      keepDashboardAtBottom(activePlayer, client, message.channel);
+    }
+
     // 1. Dedicated Song-Request Channel routing (e.g. #song-requests)
     const isRequest = await handleSongRequestMessage(message, client);
     if (isRequest) return;
@@ -45,8 +52,8 @@ module.exports = {
     );
     if (!shouldHandle) return;
 
-    // 7. Enforce voice channel safety for music commands (excludes non-voice informational commands)
-    const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist"];
+    // 7. Enforce voice channel safety for music commands (excludes non-voice informational commands, 247, and join)
+    const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist", "247", "join"];
     if (command.category === "music" && !exemptMusicCommands.includes(command.data.name)) {
       const voiceState = message.guild.voiceStates.cache.get(message.author.id);
       const userVoiceChannelId = message.member?.voice?.channelId || voiceState?.channelId;

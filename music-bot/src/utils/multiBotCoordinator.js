@@ -51,6 +51,44 @@ class MultiBotCoordinator {
   }
 
   /**
+   * Check whether a user already has an active playback session in another voice channel
+   * when multi-bot ownership is disabled (anti-hogging protection).
+   * @param {import("discord.js").Guild} guild
+   * @param {string} userId
+   * @param {string} targetVoiceChannelId
+   * @returns {{ bot: import("discord.js").Client, channelId: string } | null}
+   */
+  checkUserSessionConflict(guild, userId, targetVoiceChannelId) {
+    if (!guild || !userId) return null;
+    const db = require("../database/db");
+    const isMultiAllowed = db.getMultiBotOwnership(guild.id);
+    if (isMultiAllowed) return null;
+
+    let botsInGuild = this.clients.filter((c) => c.user?.id && c.guilds.cache.has(guild.id));
+    if (botsInGuild.length <= 1) return null;
+
+    for (const bot of botsInGuild) {
+      const player = bot.lavalink?.getPlayer(guild.id);
+      if (!player || !player.voiceChannelId) continue;
+      if (player.voiceChannelId === targetVoiceChannelId) continue;
+
+      const isActive = player.playing || player.paused || Boolean(player.queue?.current);
+      if (!isActive) continue;
+
+      const isOwner =
+        player.get("ownerId") === userId ||
+        player.queue?.current?.requester?.id === userId ||
+        (Array.isArray(player.queue?.tracks) && player.queue.tracks.some((t) => t.requester?.id === userId));
+
+      if (isOwner) {
+        return { bot, channelId: player.voiceChannelId };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Determine whether THIS bot instance should process this incoming prefix command
    * @param {import("discord.js").Client} client 
    * @param {import("discord.js").Message} message 
@@ -86,7 +124,7 @@ class MultiBotCoordinator {
     }
 
     // -------------------------------------------------------------------------
-    // Rule 2: Explicit Bot Mention Targeting (@Pulse 1 play)
+    // Rule 2: Explicit Bot Targeting (Mentions e.g. "@Pulse 1 play" or Index e.g. "2.play")
     // -------------------------------------------------------------------------
     if (parsed.isMention) {
       if (message.mentions.users.has(currentBotId)) {
@@ -98,12 +136,56 @@ class MultiBotCoordinator {
       }
     }
 
+    if (typeof parsed.targetBotIndex === "number") {
+      const targetIndex = parsed.targetBotIndex - 1; // 1 = Primary (index 0), 2 = Clone 1 (index 1), etc.
+      const targetBot = botsInGuild.find((b) => (b.botIndex ?? 0) === targetIndex);
+      if (targetBot) {
+        return currentBotId === targetBot.user.id;
+      }
+      // If user targeted a bot slot that isn't in this guild, lowest-index bot notifies user
+      if (currentBotId === botsInGuild[0].user.id) {
+        message.reply(warnText(`Bot slot **#${parsed.targetBotIndex}** is not present in this server.`)).catch(() => {});
+      }
+      return false;
+    }
+
     // -------------------------------------------------------------------------
-    // Rule 3: Non-Voice Informational & Management Commands
+    // Rule 3: Session Player Info Commands (nowplaying, queue, lyrics, grab)
+    // Always routes to the bot connected to the user's current voice channel!
+    // -------------------------------------------------------------------------
+    const sessionInfoCommands = ["nowplaying", "queue", "lyrics", "grab"];
+    if (sessionInfoCommands.includes(parsed.commandName)) {
+      const voiceState = guild.voiceStates.cache.get(message.author.id);
+      const userVoiceChannelId = message.member?.voice?.channelId || voiceState?.channelId;
+
+      if (userVoiceChannelId) {
+        const botInUserChannel = botsInGuild.find((b) => {
+          const vs = guild.voiceStates.cache.get(b.user.id);
+          return vs && vs.channelId === userVoiceChannelId;
+        });
+        if (botInUserChannel) {
+          return currentBotId === botInUserChannel.user.id;
+        }
+      }
+
+      // If user is not in a VC or no bot in user's VC, route to the first active streaming bot
+      const activeBot = botsInGuild.find((b) => {
+        const p = b.lavalink?.getPlayer(guild.id);
+        return p && (p.playing || p.queue?.current);
+      });
+      if (activeBot) {
+        return currentBotId === activeBot.user.id;
+      }
+
+      // Fallback: lowest-indexed bot
+      return currentBotId === botsInGuild[0].user.id;
+    }
+
+    // -------------------------------------------------------------------------
+    // Rule 4: Non-Voice Informational & Guild Management Commands
     // -------------------------------------------------------------------------
     const nonVoiceCommands = [
-      "help", "ping", "stats", "prefix", "dj", "setup-channel",
-      "playlist", "nowplaying", "queue", "lyrics", "grab"
+      "help", "ping", "stats", "prefix", "dj", "setup-channel", "playlist", "settings", "config"
     ];
     if (nonVoiceCommands.includes(parsed.commandName)) {
       // The lowest-indexed bot present in this guild handles non-voice commands
@@ -111,7 +193,7 @@ class MultiBotCoordinator {
     }
 
     // -------------------------------------------------------------------------
-    // Rule 4: Resolve User Voice Channel (Survives Uncached Members)
+    // Rule 5: Resolve User Voice Channel (Survives Uncached Members)
     // -------------------------------------------------------------------------
     const voiceState = guild.voiceStates.cache.get(message.author.id);
     const userVoiceChannelId = message.member?.voice?.channelId || voiceState?.channelId;
@@ -119,13 +201,13 @@ class MultiBotCoordinator {
     if (!userVoiceChannelId) {
       // User is not in any voice channel: lowest-indexed bot notifies user once
       if (currentBotId === botsInGuild[0].user.id) {
-        message.reply(errorText("You need to be in a voice channel to play music!")).catch(() => {});
+        message.reply(errorText("You need to be in a voice channel to use music commands!")).catch(() => {});
       }
       return false;
     }
 
     // -------------------------------------------------------------------------
-    // Rule 5: Active Voice Channel Affinity (Session Owner)
+    // Rule 6: Active Voice Channel Affinity (Session Owner)
     // -------------------------------------------------------------------------
     // If any bot in this guild is already connected to user's VC, ONLY that bot responds!
     const botInUserChannel = botsInGuild.find((b) => {
@@ -138,19 +220,54 @@ class MultiBotCoordinator {
     }
 
     // -------------------------------------------------------------------------
-    // Rule 6: Idle Bot Allocation (Next Available Instance in this Guild)
+    // Rule 7: Multi-Bot Session Ownership Guard (Anti-Hogging Protection)
     // -------------------------------------------------------------------------
-    const firstIdleBot = botsInGuild.find((b) => {
-      const vs = guild.voiceStates.cache.get(b.user.id);
-      return !vs || !vs.channelId;
-    });
-
-    if (firstIdleBot) {
-      return currentBotId === firstIdleBot.user.id;
+    const playCommands = ["play", "join", "search"];
+    if (playCommands.includes(parsed.commandName)) {
+      const conflict = this.checkUserSessionConflict(guild, message.author.id, userVoiceChannelId);
+      if (conflict) {
+        if (currentBotId === botsInGuild[0].user.id) {
+          const botName = conflict.bot.user?.username || "Pulse";
+          message.reply(
+            warnText(
+              `You already have an active playback session with **${botName}** in <#${conflict.channelId}>.`,
+              `Finish that session or ask an administrator to enable multi-room playback using \`/settings multi-ownership enable\`.`
+            )
+          ).catch(() => {});
+        }
+        return false;
+      }
     }
 
     // -------------------------------------------------------------------------
-    // Rule 7: All Bot Slots in this Server are Busy
+    // Rule 8: Idle Bot Allocation (Next Available Instance in this Guild)
+    // -------------------------------------------------------------------------
+    const firstIdleBot = botsInGuild.find((b) => {
+      const vs = guild.voiceStates.cache.get(b.user.id);
+      if (vs && vs.channelId) return false;
+
+      const p = b.lavalink?.getPlayer(guild.id);
+      if (p && (p.voiceChannelId || p.connecting)) return false;
+
+      // In-memory pending reservation lock (5-second window during gateway handshake)
+      if (b._pendingVoiceChannelId && (Date.now() - (b._pendingVoiceTimestamp || 0)) < 5000) {
+        return false;
+      }
+
+      return true;
+    });
+
+    if (firstIdleBot) {
+      if (currentBotId === firstIdleBot.user.id) {
+        firstIdleBot._pendingVoiceChannelId = userVoiceChannelId;
+        firstIdleBot._pendingVoiceTimestamp = Date.now();
+        return true;
+      }
+      return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Rule 9: All Bot Slots in this Server are Busy
     // -------------------------------------------------------------------------
     if (currentBotId === botsInGuild[0].user.id) {
       message.reply(

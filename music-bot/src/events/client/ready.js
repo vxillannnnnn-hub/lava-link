@@ -4,6 +4,7 @@ const stateManager = require("../../utils/stateManager");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 const presenceManager = require("../../utils/presenceManager");
 const { start247HealthCheck } = require("../../utils/reconnect247");
+const emojis = require("../../utils/emojis");
 
 module.exports = {
   name: Events.ClientReady || "clientReady",
@@ -20,6 +21,22 @@ module.exports = {
 
     // Register this bot's user ID into multi-bot coordinator
     multiBotCoordinator.registerBotIds([client.user.id]);
+    multiBotCoordinator.registerClient(client);
+
+    // Dynamic Discord Application Emoji Fetch & Cache (Per-Bot Context)
+    if (client.application?.emojis) {
+      try {
+        const fetchedEmojis = await client.application.emojis.fetch();
+        client.emojisMap = {};
+        for (const emoji of fetchedEmojis.values()) {
+          client.emojisMap[emoji.name.toLowerCase()] = emoji.toString();
+        }
+        emojis.registerBotEmojis(client.user.id, client.emojisMap);
+        logger.success(`${shardInfo}Cached ${fetchedEmojis.size} Discord Application Emojis for ${client.user.tag}`);
+      } catch (err) {
+        logger.debug(`${shardInfo}Application emojis live fetch notice: ${err.message}`);
+      }
+    }
 
     // Initialize Lavalink Manager with Bot Client credentials
     await client.lavalink.init({

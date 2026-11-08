@@ -77,8 +77,8 @@ function buildNowPlayingEmbed(player) {
  * [ ⏮ Previous ] [ ⏯ Play/Pause ] [ ⏭ Skip ] [ 🎛 Controls ]
  */
 function buildNowPlayingComponents(player) {
-  const isPaused = player.paused;
-  const hasPrevious = (player.queue.previous?.length || 0) > 0;
+  const isPaused = Boolean(player.paused);
+  const hasPrevious = (player.queue?.previous?.length || 0) > 0;
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -98,7 +98,7 @@ function buildNowPlayingComponents(player) {
       .setCustomId("btn_open_player")
       .setEmoji(emojis.openPlayer)
       .setLabel("Controls")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Secondary)
   );
 
   return [row];
@@ -270,58 +270,181 @@ function getDashboardPayload(player) {
   });
 }
 
+// Active real-time dashboard progress intervals mapped by guildId
+const dashboardIntervals = new Map();
+
+// Debounce timers for smoothly keeping now playing dashboard at the bottom of the channel
+const bottomDebounceTimers = new Map();
+
 /**
  * Send or Edit in-place the Player Dashboard (Jockie / Eara Best Practice)
- * Prevents channel spam and completely stops repeated user notification pings
+ * Prevents channel spam, completely stops repeated user notification pings,
+ * and always keeps the active embed pinned to the bottom of the channel when new messages arrive.
  */
-async function sendOrUpdatePlayerDashboard(channel, player) {
+async function sendOrUpdatePlayerDashboard(channel, player, forceBottom = false) {
   if (!channel || !player) return null;
+  if (!player.queue?.current && !player.playing) return null;
 
-  const payload = getDashboardPayload(player);
-  const prevMsgId = player.get("nowPlayingMsgId");
+  // Prevent concurrent duplicate sends/edits during rapid progress ticks or burst messages
+  if (player.get("isDashboardUpdating")) return null;
+  player.set("isDashboardUpdating", true);
 
-  // Attempt to edit previous message in-place if still in channel
-  if (prevMsgId) {
-    try {
-      const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
-      if (prevMsg && prevMsg.editable) {
-        return await prevMsg.edit(payload);
-      }
-    } catch {
-      // If Components V2 rejected or message deleted, try fallback
-      if (payload.flags === 32768) {
+  try {
+    const payload = getDashboardPayload(player);
+    const prevMsgId = player.get("nowPlayingMsgId");
+
+    if (prevMsgId) {
+      if (!forceBottom) {
+        // Normal 5s progress tick: smooth in-place edit with 0ms screen flicker
         try {
-          const fallback = getFallbackEmbedPayload(player);
           const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
           if (prevMsg && prevMsg.editable) {
-            return await prevMsg.edit(fallback);
+            return await prevMsg.edit(payload);
           }
-        } catch {}
+        } catch (_) {}
+      } else {
+        // forceBottom requested (e.g. user chat arrived below embed):
+        // Only delete & resend if newer messages were actually posted in the channel
+        if (channel.lastMessageId && channel.lastMessageId !== prevMsgId) {
+          try {
+            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
+            if (prevMsg && prevMsg.deletable) {
+              await prevMsg.delete().catch(() => {});
+            }
+          } catch (_) {}
+        } else {
+          // Still at bottom, smooth in-place edit
+          try {
+            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
+            if (prevMsg && prevMsg.editable) {
+              return await prevMsg.edit(payload);
+            }
+          } catch (_) {}
+        }
       }
     }
+
+    // Otherwise send a new dashboard at the bottom and store its ID
+    try {
+      const msg = await channel.send(payload);
+      player.set("nowPlayingMsgId", msg.id);
+      return msg;
+    } catch (err) {
+      // If Components V2 failed (e.g. channel restrictions), gracefully fall back
+      if (payload?.flags === 32768) {
+        try {
+          const fallback = getFallbackEmbedPayload(player);
+          const msg = await channel.send(fallback);
+          player.set("nowPlayingMsgId", msg.id);
+          return msg;
+        } catch (innerErr) {
+          logger.debug("Failed to send fallback player dashboard:", innerErr.message);
+          return null;
+        }
+      }
+      logger.debug("Failed to send player dashboard:", err.message);
+      return null;
+    }
+  } finally {
+    player.set("isDashboardUpdating", false);
+  }
+}
+
+/**
+ * Start real-time progress update loop for the now playing dashboard.
+ * Ticks every 5 seconds (strictly compliant with Discord's 5s channel rate limits).
+ * Automatically repositions the embed to the bottom of the channel if users send messages.
+ */
+function startRealtimeProgressLoop(player, client) {
+  if (!player || !player.guildId) return;
+
+  // Clear existing timer if any
+  stopRealtimeProgressLoop(player);
+
+  const UPDATE_INTERVAL_MS = 5000; // 5 seconds (optimal rate limit safety)
+  const timerKey = `${player.guildId}:${client?.user?.id || "default"}`;
+
+  const timer = setInterval(async () => {
+    try {
+      if (!player || !player.connected || !player.queue?.current) {
+        stopRealtimeProgressLoop(player);
+        return;
+      }
+
+      // If playback is paused or is a livestream, freeze progress slider updates
+      if (player.paused || player.queue?.current?.info?.isStream) return;
+
+      const channelId = player.textChannelId;
+      if (!channelId) return;
+
+      const channel = client.channels.cache.get(channelId);
+      if (!channel) return;
+
+      await sendOrUpdatePlayerDashboard(channel, player);
+    } catch (err) {
+      logger.debug(`Dashboard progress tick notice [${player.guildId}]:`, err.message);
+    }
+  }, UPDATE_INTERVAL_MS);
+
+  if (timer.unref) timer.unref();
+  player._dashboardTimer = timer;
+  dashboardIntervals.set(timerKey, timer);
+}
+
+/**
+ * Stop active real-time progress loop
+ */
+function stopRealtimeProgressLoop(player) {
+  if (!player || !player.guildId) return;
+
+  if (player._dashboardTimer) {
+    clearInterval(player._dashboardTimer);
+    player._dashboardTimer = null;
+  }
+  if (player._bottomDebounceTimer) {
+    clearTimeout(player._bottomDebounceTimer);
+    player._bottomDebounceTimer = null;
   }
 
-  // Otherwise send a new dashboard and store its ID
-  try {
-    const msg = await channel.send(payload);
-    player.set("nowPlayingMsgId", msg.id);
-    return msg;
-  } catch (err) {
-    // If Components V2 failed (e.g. channel restrictions), gracefully fall back
-    if (payload.flags === 32768) {
-      try {
-        const fallback = getFallbackEmbedPayload(player);
-        const msg = await channel.send(fallback);
-        player.set("nowPlayingMsgId", msg.id);
-        return msg;
-      } catch (innerErr) {
-        logger.error("Failed to send fallback player dashboard:", innerErr.message);
-        return null;
-      }
+  for (const [k, t] of dashboardIntervals.entries()) {
+    if (k.startsWith(player.guildId)) {
+      clearInterval(t);
+      dashboardIntervals.delete(k);
     }
-    logger.error("Failed to send player dashboard:", err.message);
-    return null;
   }
+  for (const [k, t] of bottomDebounceTimers.entries()) {
+    if (k.startsWith(player.guildId)) {
+      clearTimeout(t);
+      bottomDebounceTimers.delete(k);
+    }
+  }
+}
+
+/**
+ * Keeps the now playing dashboard at the bottom of the channel when new messages arrive.
+ * Debounced gently (2000ms) to prevent Discord API spam during rapid chat bursts.
+ */
+function keepDashboardAtBottom(player, client, channel) {
+  if (!player || !player.guildId || !player.queue?.current || !channel) return;
+  const prevMsgId = player.get("nowPlayingMsgId");
+  if (!prevMsgId) return;
+
+  const timerKey = `${player.guildId}:${client?.user?.id || "default"}`;
+  const existing = bottomDebounceTimers.get(timerKey) || player._bottomDebounceTimer;
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    try {
+      if (!player.connected || !player.queue?.current) return;
+      if (channel.lastMessageId && channel.lastMessageId !== player.get("nowPlayingMsgId")) {
+        await sendOrUpdatePlayerDashboard(channel, player, true);
+      }
+    } catch (_) {}
+  }, 2000);
+
+  if (timer.unref) timer.unref();
+  player._bottomDebounceTimer = timer;
+  bottomDebounceTimers.set(timerKey, timer);
 }
 
 /**
@@ -466,6 +589,7 @@ async function handlePlayerButton(interaction, client) {
       if (player.paused) {
         await player.resume();
         voiceStatusManager.onResume(client, player);
+        startRealtimeProgressLoop(player, client);
       } else {
         await player.pause();
         voiceStatusManager.onPause(client, player);
@@ -983,4 +1107,7 @@ module.exports = {
   updatePlayerInteraction,
   handlePlayerButton,
   handleFilterSelect,
+  startRealtimeProgressLoop,
+  stopRealtimeProgressLoop,
+  keepDashboardAtBottom,
 };

@@ -107,6 +107,19 @@ async function handleSongRequestMessage(message, client) {
       return false;
     }
 
+    // Multi-Bot Fleet Arbitration: Ensure only ONE assigned bot handles the request
+    const multiBotCoordinator = require("./multiBotCoordinator");
+    const shouldHandle = multiBotCoordinator.shouldHandle(
+      client,
+      message,
+      client.botIndex || 0,
+      { commandName: "play", args: [message.content], isMention: false }
+    );
+
+    if (!shouldHandle) {
+      return true;
+    }
+
     // Delete user's message immediately to keep the channel 100% clean
     message.delete().catch(() => {});
 

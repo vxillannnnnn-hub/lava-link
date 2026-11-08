@@ -14,6 +14,11 @@ module.exports = {
     }
 
     const vcId = player.voiceChannelId;
+    if (player.get("247")) {
+      player.set("247", false);
+      const db = require("../../database/db");
+      db.set247(interaction.guildId, false, null, null, client.user.id);
+    }
     await player.destroy("User ran /leave command");
 
     return interaction.reply(

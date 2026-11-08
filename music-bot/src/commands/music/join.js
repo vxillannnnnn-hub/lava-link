@@ -16,12 +16,27 @@ module.exports = {
     }
 
     const me = interaction.guild.members.me;
-    const permissions = voiceChannel.permissionsFor(me);
+    const permissions = voiceChannel.permissionsFor(me || client.user.id);
     if (!permissions?.has(PermissionFlagsBits.Connect)) {
       return interaction.reply(errorText(`I lack permission to **Connect** to <#${voiceChannel.id}>.`));
     }
     if (!permissions?.has(PermissionFlagsBits.Speak)) {
       return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
+    }
+
+    const multiBotCoordinator = require("../../utils/multiBotCoordinator");
+    const otherBotInVC = (multiBotCoordinator.clients || []).find((c) => {
+      if (c.user?.id === client.user.id) return false;
+      const vs = interaction.guild.voiceStates.cache.get(c.user?.id);
+      return vs && vs.channelId === voiceChannel.id;
+    });
+
+    if (otherBotInVC) {
+      return interaction.reply(
+        warnText(
+          `Another bot (<@${otherBotInVC.user.id}>) is already active in <#${voiceChannel.id}>! Each bot manages its own voice channel.`
+        )
+      );
     }
 
     let player = client.lavalink.getPlayer(interaction.guildId);
@@ -32,7 +47,14 @@ module.exports = {
       }
       player.voiceChannelId = voiceChannel.id;
       await player.connect();
-    audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
+      audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
+
+      const db = require("../../database/db");
+      const current247 = db.get247(interaction.guildId, client.user.id);
+      if (current247.enabled) {
+        db.set247(interaction.guildId, true, voiceChannel.id, interaction.channelId, client.user.id);
+      }
+
       return interaction.reply(
         actionText(emojis.volumeNormal, `Moved to voice channel <#${voiceChannel.id}>.`)
       );
@@ -48,6 +70,7 @@ module.exports = {
     player.set("autoplay", config.player.defaultAutoplay ?? false);
 
     await player.connect();
+    player.set("ownerId", interaction.user?.id || interaction.author?.id);
     audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
     const voiceStatusManager = require("../../utils/voiceStatusManager");
     voiceStatusManager.setIdleVoiceStatus(client, voiceChannel.id, interaction.guildId);

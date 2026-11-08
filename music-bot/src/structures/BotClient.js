@@ -148,10 +148,17 @@ class BotClient extends Client {
       const filePath = path.join(eventsPath, file);
       try {
         const event = require(filePath);
+        const handler = async (...args) => {
+          try {
+            await event.execute(...args, this);
+          } catch (err) {
+            logger.error(`Error in event "${event.name}":`, err?.stack || err);
+          }
+        };
         if (event.once) {
-          this.once(event.name, (...args) => event.execute(...args, this));
+          this.once(event.name, handler);
         } else {
-          this.on(event.name, (...args) => event.execute(...args, this));
+          this.on(event.name, handler);
         }
         loadedCount++;
       } catch (err) {

@@ -21,6 +21,20 @@ module.exports = {
 
     const vcId = player.voiceChannelId;
     player.queue.tracks.splice(0, player.queue.tracks.length);
+
+    if (player.get("247")) {
+      await player.stop().catch(() => {});
+      const voiceStatusManager = require("../../utils/voiceStatusManager");
+      voiceStatusManager.setIdleVoiceStatus(client, vcId, interaction.guildId);
+      return interaction.reply(
+        actionText(
+          emojis.stop,
+          "Audio stream stopped and queue cleared.",
+          vcId ? `Staying in <#${vcId}> (24/7 Mode Active).` : "24/7 Mode Active"
+        )
+      );
+    }
+
     await player.destroy("User ran /stop command");
 
     return interaction.reply(

@@ -65,6 +65,9 @@ const ALIAS_MAP = new Map([
   ["h", "help"],
   ["playlist", "playlist"],
   ["pl", "playlist"],
+  ["settings", "settings"],
+  ["config", "settings"],
+  ["guildsettings", "settings"],
 ]);
 
 function escapeRegex(str) {
@@ -87,10 +90,84 @@ function parseMessage(message, guildPrefix = ".", clientUser) {
   const escapedPrefix = escapeRegex(cleanGuildPrefix);
   const clientId = clientUser?.id || "";
 
-  // Match:
-  // 1. Direct bot mention: <@!clientId> or <@clientId>
-  // 2. Configured server prefix
-  // 3. Always allow standard '.' prefix as reliable fallback
+  // ---------------------------------------------------------------------------
+  // 1. Explicit Numbered Prefix Multi-Bot Targeting (Jockie Architecture)
+  // e.g. "1.play song", "2.play song", "1.247", "2.247", "1!play", "2!play"
+  // ---------------------------------------------------------------------------
+  const idxPrefixMatch = content.match(/^([1-9])([.!?~-])\s*(.*)$/);
+  if (idxPrefixMatch) {
+    const targetBotIndex = parseInt(idxPrefixMatch[1], 10);
+    const rem = idxPrefixMatch[3].trim();
+    if (rem) {
+      const tokens = rem.split(/\s+/);
+      const rawCommand = tokens[0].toLowerCase();
+      const canonicalCommand = ALIAS_MAP.get(rawCommand) || rawCommand;
+      const args = tokens.slice(1);
+      const rawArgs = rem.slice(tokens[0].length).trim();
+      return {
+        commandName: canonicalCommand,
+        rawCommand,
+        args,
+        rawArgs,
+        matchedPrefix: `${idxPrefixMatch[1]}${idxPrefixMatch[2]}`,
+        isMention: false,
+        targetBotIndex,
+      };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. Prefix-Followed-By-Number Targeting: ".1 play", ".2 play", ".1 247", ".2 247"
+  // ---------------------------------------------------------------------------
+  const prefixIdxMatch = content.match(/^([.!?~-])([1-9])\s+(.*)$/);
+  if (prefixIdxMatch) {
+    const targetBotIndex = parseInt(prefixIdxMatch[2], 10);
+    const rem = prefixIdxMatch[3].trim();
+    if (rem) {
+      const tokens = rem.split(/\s+/);
+      const rawCommand = tokens[0].toLowerCase();
+      const canonicalCommand = ALIAS_MAP.get(rawCommand) || rawCommand;
+      const args = tokens.slice(1);
+      const rawArgs = rem.slice(tokens[0].length).trim();
+      return {
+        commandName: canonicalCommand,
+        rawCommand,
+        args,
+        rawArgs,
+        matchedPrefix: `${prefixIdxMatch[1]}${prefixIdxMatch[2]} `,
+        isMention: false,
+        targetBotIndex,
+      };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. Shorthand "1 play", "2 play", "1 247", "2 247"
+  // ---------------------------------------------------------------------------
+  const numCmdMatch = content.match(/^([1-9])\s+([a-zA-Z0-9]+)\s*(.*)$/);
+  if (numCmdMatch) {
+    const targetBotIndex = parseInt(numCmdMatch[1], 10);
+    const rawCommand = numCmdMatch[2].toLowerCase();
+    const canonicalCommand = ALIAS_MAP.get(rawCommand) || rawCommand;
+    // Only match if word is an actual command/alias to avoid intercepting regular user chat numbers
+    if (ALIAS_MAP.has(rawCommand) || ["play", "stop", "skip", "pause", "resume", "queue", "247", "join", "volume", "loop", "shuffle"].includes(canonicalCommand)) {
+      const rem = numCmdMatch[3] ? numCmdMatch[3].trim() : "";
+      const args = rem ? rem.split(/\s+/) : [];
+      return {
+        commandName: canonicalCommand,
+        rawCommand,
+        args,
+        rawArgs: rem,
+        matchedPrefix: `${numCmdMatch[1]} `,
+        isMention: false,
+        targetBotIndex,
+      };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Standard Prefix & Mention Matching
+  // ---------------------------------------------------------------------------
   const prefixes = [escapedPrefix];
   if (cleanGuildPrefix !== ".") {
     prefixes.push("\\.");

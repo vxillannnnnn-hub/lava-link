@@ -24,6 +24,13 @@ module.exports = {
     await player.pause();
     voiceStatusManager.onPause(client, player);
 
+    // Update now playing dashboard immediately to reflect paused state
+    const { sendOrUpdatePlayerDashboard } = require("../../utils/playerController");
+    if (player.textChannelId) {
+      const channel = client.channels.cache.get(player.textChannelId);
+      if (channel) sendOrUpdatePlayerDashboard(channel, player).catch(() => {});
+    }
+
     return interaction.reply(
       actionWithButton(
         emojis.pause,

@@ -1,0 +1,14 @@
+[
+  {
+    "guild_id": "test_guild_999999",
+    "bot_user_id": "111111111111111111",
+    "voice_channel_id": "vc_channel_111",
+    "text_channel_id": "txt1"
+  },
+  {
+    "guild_id": "test_guild_999999",
+    "bot_user_id": "222222222222222222",
+    "voice_channel_id": "vc_channel_222",
+    "text_channel_id": "txt2"
+  }
+]

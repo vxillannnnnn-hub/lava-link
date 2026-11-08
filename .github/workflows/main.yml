@@ -433,6 +433,7 @@ jobs:
           LAVALINK_PORT: ${{ secrets.LAVALINK_PORT || env.PARSED_PORT }}
           LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || env.PARSED_PASSWORD }}
           LAVALINK_SECURE: ${{ secrets.LAVALINK_SECURE || env.PARSED_SECURE }}
+          LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
           RUNNER_LIFETIME_MS: "19800000"
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}

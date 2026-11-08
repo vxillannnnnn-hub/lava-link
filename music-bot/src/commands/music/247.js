@@ -5,6 +5,7 @@ const db = require("../../database/db");
 const config = require("../../config");
 const audioOptimizer = require("../../utils/audioOptimizer");
 const voiceStatusManager = require("../../utils/voiceStatusManager");
+const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -15,7 +16,7 @@ module.exports = {
     let player = client.lavalink.getPlayer(interaction.guildId);
 
     // Identify target voice channel: either member's current VC or existing player VC
-    const memberVC = interaction.member.voice?.channel;
+    const memberVC = interaction.member?.voice?.channel;
     const playerVCId = player?.voiceChannelId;
     const targetVC = memberVC || (playerVCId ? interaction.guild.channels.cache.get(playerVCId) : null);
 
@@ -28,18 +29,44 @@ module.exports = {
       );
     }
 
-    const current247 = db.get247(interaction.guildId);
-    const newState = !current247.enabled;
+    const botId = client.user.id;
+    const current247 = db.get247(interaction.guildId, botId);
+
+    // If this bot is already 24/7 in this exact channel, toggle it off.
+    // If this bot is 24/7 in a different channel, move it to this new channel.
+    // If this bot does not have 24/7 enabled, turn it on!
+    let newState;
+    if (current247.enabled && current247.voiceChannelId === targetVC.id) {
+      newState = false;
+    } else {
+      newState = true;
+    }
 
     if (newState) {
+      // Fleet conflict check: ensure another bot from our fleet is not already connected to targetVC
+      const fleetClients = multiBotCoordinator.clients || [];
+      const otherBotInVC = fleetClients.find((c) => {
+        if (c.user?.id === botId) return false;
+        const vs = interaction.guild.voiceStates.cache.get(c.user?.id);
+        return vs && vs.channelId === targetVC.id;
+      });
+
+      if (otherBotInVC) {
+        return interaction.reply(
+          warnText(
+            `Another bot (<@${otherBotInVC.user.id}>) is already active in <#${targetVC.id}>! Each bot manages its own voice channel.`
+          )
+        );
+      }
+
       // Check bot permissions in target channel
-      const perms = targetVC.permissionsFor(interaction.guild.members.me);
+      const perms = targetVC.permissionsFor(interaction.guild.members.me || client.user.id);
       if (!perms?.has(PermissionFlagsBits.Connect)) {
         return interaction.reply(errorText(`I lack permission to **Connect** to <#${targetVC.id}>.`));
       }
 
-      // 1. Permanently save to SQLite and JSON mirror
-      db.set247(interaction.guildId, true, targetVC.id, interaction.channelId, client.user.id);
+      // 1. Permanently save to SQLite and JSON mirror for THIS bot
+      db.set247(interaction.guildId, true, targetVC.id, interaction.channelId, botId);
 
       // 2. Create or connect player instance
       if (!player) {
@@ -53,7 +80,7 @@ module.exports = {
       }
 
       player.set("247", true);
-      if (!player.connected) {
+      if (!player.connected || player.voiceChannelId !== targetVC.id) {
         player.voiceChannelId = targetVC.id;
         await player.connect();
       }
@@ -65,25 +92,27 @@ module.exports = {
         voiceStatusManager.setIdleVoiceStatus(client, targetVC.id, interaction.guildId);
       }
 
+      const botTag = client.user.username || "Bot";
       return interaction.reply(
         actionText(
           emojis.time,
-          `24/7 Voice Channel mode **ENABLED** in <#${targetVC.id}>.`,
-          "Persistent across all restarts · Bot will automatically reconnect to this voice channel 24/7."
+          `24/7 Voice Channel mode **ENABLED** for **${botTag}** in <#${targetVC.id}>.`,
+          "Persistent across all restarts · This bot will automatically reconnect to this voice channel 24/7."
         )
       );
     } else {
-      // Disable 24/7 mode in database
-      db.set247(interaction.guildId, false, null, null, null);
+      // Disable 24/7 mode in database for THIS bot
+      db.set247(interaction.guildId, false, null, null, botId);
 
       if (player) {
         player.set("247", false);
       }
 
+      const botTag = client.user.username || "Bot";
       return interaction.reply(
         actionText(
           emojis.time,
-          "24/7 Voice Channel mode **DISABLED**.",
+          `24/7 Voice Channel mode **DISABLED** for **${botTag}**.`,
           "Bot will now automatically disconnect when the queue finishes or the voice channel is empty."
         )
       );

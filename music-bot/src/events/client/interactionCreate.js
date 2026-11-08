@@ -87,8 +87,8 @@ module.exports = {
         return interaction.reply(errorText(`Command \`/${interaction.commandName}\` does not exist.`));
       }
 
-      // Voice channel checks for music playback/control commands (excludes non-voice management/informational commands)
-      const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist"];
+      // Voice channel checks for music playback/control commands (excludes non-voice management/informational commands, 247, and join)
+      const exemptMusicCommands = ["nowplaying", "queue", "lyrics", "grab", "setup-channel", "dj", "playlist", "247", "join"];
       if (command.category === "music" && !exemptMusicCommands.includes(command.data.name)) {
         if (!interaction.member?.voice?.channelId) {
           return interaction.reply(
@@ -101,6 +101,25 @@ module.exports = {
           return interaction.reply(
             warnText(`You must be in the same voice channel (<#${player.voiceChannelId}>) as the bot to use music controls.`)
           );
+        }
+      }
+
+      // Anti-Hogging Multi-Bot Ownership Guard for Slash Commands
+      if (["play", "join", "search"].includes(command.data.name)) {
+        const userVoiceChannelId = interaction.member?.voice?.channelId;
+        const player = client.lavalink?.getPlayer(interaction.guildId);
+        if (userVoiceChannelId && (!player || player.voiceChannelId !== userVoiceChannelId)) {
+          const multiBotCoordinator = require("../../utils/multiBotCoordinator");
+          const conflict = multiBotCoordinator.checkUserSessionConflict(interaction.guild, interaction.user.id, userVoiceChannelId);
+          if (conflict) {
+            const botName = conflict.bot.user?.username || "Pulse";
+            return interaction.reply(
+              warnText(
+                `You already have an active playback session with **${botName}** in <#${conflict.channelId}>.`,
+                `Finish that session or ask an administrator to enable multi-room playback using \`/settings multi-ownership enable\`.`
+              )
+            );
+          }
         }
       }
 

@@ -19,7 +19,7 @@ module.exports = {
       : (parseInt(process.env.LAVALINK_PORT || "443", 10) === 443),
     retryAmount: Infinity,
     retryDelay: 1000, // 1s fast reconnection
-    requestTimeout: 6000, // Snappier REST timeout
+    requestTimeout: parseInt(process.env.LAVALINK_REQUEST_TIMEOUT_MS || "20000", 10), // 20s resilient REST timeout for high-latency tunnels
     heartBeatInterval: 25000, // 25s keepalive keeps Cloudflare Tunnel & NAT mapping primed
     sessionResumeTimeout: 60, // 60s session resuming for seamless <50ms reconnection
   },

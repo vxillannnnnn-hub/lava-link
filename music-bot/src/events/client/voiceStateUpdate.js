@@ -38,13 +38,22 @@ module.exports = {
       // 2. Disconnect / Kick / Move Cleanup
       // -------------------------------------------------------------------------
       if (oldState.id === client.user.id && !newState.channelId) {
-        logger.info(`Bot was disconnected from voice channel in guild: ${guildId}`);
+        logger.info(`Bot ${client.user?.username} was disconnected from voice channel in guild: ${guildId}`);
+        const is247 = Boolean(player?.get("247"));
         if (player) {
-          player.destroy("Bot disconnected from voice channel");
+          player.destroy("Bot disconnected from voice channel").catch(() => {});
         }
-        if (emptyChannelTimeouts.has(guildId)) {
-          clearTimeout(emptyChannelTimeouts.get(guildId));
-          emptyChannelTimeouts.delete(guildId);
+        const timeoutKey = `${guildId}_${client.user.id}`;
+        if (emptyChannelTimeouts.has(timeoutKey)) {
+          clearTimeout(emptyChannelTimeouts.get(timeoutKey));
+          emptyChannelTimeouts.delete(timeoutKey);
+        }
+        // Auto-reconnect if 24/7 is enabled
+        if (is247) {
+          setTimeout(() => {
+            const reconnect247 = require("../../utils/reconnect247");
+            reconnect247(client).catch(() => {});
+          }, 5000);
         }
         return;
       }
@@ -66,15 +75,22 @@ module.exports = {
       if (!player.voiceChannelId) return;
 
       // Count non-bot members in voice channel using live gateway voiceStates cache (reliable across 1M+ servers)
+      const multiBotCoordinator = require("../../utils/multiBotCoordinator");
       const humanListeners = newState.guild.voiceStates.cache.filter(
-        (vs) => vs.channelId === player.voiceChannelId && vs.id !== client.user.id
+        (vs) =>
+          vs.channelId === player.voiceChannelId &&
+          vs.id !== client.user.id &&
+          !multiBotCoordinator.allBotIds.includes(vs.id) &&
+          !vs.member?.user?.bot
       ).size;
+
+      const timeoutKey = `${guildId}_${client.user.id}`;
 
       // If 24/7 mode is active, do not leave
       if (player.get("247")) {
-        if (emptyChannelTimeouts.has(guildId)) {
-          clearTimeout(emptyChannelTimeouts.get(guildId));
-          emptyChannelTimeouts.delete(guildId);
+        if (emptyChannelTimeouts.has(timeoutKey)) {
+          clearTimeout(emptyChannelTimeouts.get(timeoutKey));
+          emptyChannelTimeouts.delete(timeoutKey);
         }
         return;
       }
@@ -82,7 +98,7 @@ module.exports = {
       if (humanListeners === 0) {
         // Auto-pause audio stream to conserve CPU and network bandwidth
         if (player.playing && !player.paused) {
-          await player.pause();
+          await player.pause().catch(() => {});
           player.set("autoPaused", true);
           logger.info(`Auto-paused playback in guild ${guildId} because voice channel is empty.`);
         }
@@ -91,8 +107,8 @@ module.exports = {
         const voiceStatusManager = require("../../utils/voiceStatusManager");
         voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, guildId);
 
-        if (!emptyChannelTimeouts.has(guildId)) {
-          logger.info(`Voice channel empty in guild ${guildId}. Starting 2-minute auto-leave timer.`);
+        if (!emptyChannelTimeouts.has(timeoutKey)) {
+          logger.info(`Voice channel empty in guild ${guildId} for ${client.user.username}. Starting 2-minute auto-leave timer.`);
           
           if (player.textChannelId) {
             const textChannel = newState.guild.channels.cache.get(player.textChannelId);
@@ -109,25 +125,29 @@ module.exports = {
           }
 
           const timeout = setTimeout(async () => {
-            const stillEmpty = newState.guild.voiceStates.cache.filter(
-              (vs) => vs.channelId === player.voiceChannelId && vs.id !== client.user.id
-            ).size === 0;
+            const stillHumanListeners = newState.guild.voiceStates.cache.filter(
+              (vs) =>
+                vs.channelId === player.voiceChannelId &&
+                vs.id !== client.user.id &&
+                !multiBotCoordinator.allBotIds.includes(vs.id) &&
+                !vs.member?.user?.bot
+            ).size;
 
-            if (stillEmpty) {
-              logger.info(`Auto-leaving voice channel in guild ${guildId} due to inactivity.`);
-              player.destroy("Voice channel left empty");
+            if (stillHumanListeners === 0) {
+              logger.info(`Auto-leaving voice channel in guild ${guildId} for ${client.user.username} due to inactivity.`);
+              player.destroy("Voice channel left empty").catch(() => {});
             }
-            emptyChannelTimeouts.delete(guildId);
+            emptyChannelTimeouts.delete(timeoutKey);
           }, config.player.emptyChannelTimeoutMs);
 
-          emptyChannelTimeouts.set(guildId, timeout);
+          emptyChannelTimeouts.set(timeoutKey, timeout);
         }
       } else {
         // Humans returned, cancel timeout and auto-resume if previously paused
-        if (emptyChannelTimeouts.has(guildId)) {
+        if (emptyChannelTimeouts.has(timeoutKey)) {
           logger.info(`Human listeners present (${humanListeners}) in guild ${guildId}. Cancelling auto-leave timer.`);
-          clearTimeout(emptyChannelTimeouts.get(guildId));
-          emptyChannelTimeouts.delete(guildId);
+          clearTimeout(emptyChannelTimeouts.get(timeoutKey));
+          emptyChannelTimeouts.delete(timeoutKey);
         }
 
         if (player.paused && player.get("autoPaused")) {

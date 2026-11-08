@@ -322,5 +322,14 @@
     "unicode": "━",
     "emojiId": "1568637103095554099",
     "discordTag": "<:bar_single_f:1568637103095554099>"
+  },
+  "controls": {
+    "name": "controls",
+    "svgFile": "controls.svg",
+    "pngFile": "controls.png",
+    "cdnUrl": "https://raw.githubusercontent.com/apunabhibhilegendhai/lavalink-server/main/assets/emojis/controls.png",
+    "unicode": "🎛",
+    "emojiId": "1568865458659131472",
+    "discordTag": "<:controls:1568865458659131472>"
   }
 }

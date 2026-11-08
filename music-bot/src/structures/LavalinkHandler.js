@@ -1,8 +1,8 @@
-const { LavalinkManager } = require("lavalink-client");
+const { LavalinkManager, Player, LavalinkNode } = require("lavalink-client");
 const config = require("../config");
 const logger = require("../utils/logger");
 const autoplayManager = require("../utils/autoplayManager");
-const { sendOrUpdatePlayerDashboard } = require("../utils/playerController");
+const { sendOrUpdatePlayerDashboard, startRealtimeProgressLoop, stopRealtimeProgressLoop } = require("../utils/playerController");
 const { updateRequestChannelDashboard } = require("../utils/requestChannelManager");
 const { infoEmbed, warnEmbed, errorEmbed } = require("../utils/embed");
 const { truncate } = require("../utils/formatters");
@@ -12,6 +12,114 @@ const presenceManager = require("../utils/presenceManager");
 const audioOptimizer = require("../utils/audioOptimizer");
 const stateManager = require("../utils/stateManager");
 const { reconnect247 } = require("../utils/reconnect247");
+
+// =============================================================================
+// Resilient Monkey-Patching for LavalinkNode & Player (Self-Healing Audio Engine)
+// Prevents unhandled promise rejections and auto-retries transient network timeouts
+// =============================================================================
+if (LavalinkNode && LavalinkNode.prototype && !LavalinkNode.prototype._patchedResilientRequest) {
+  LavalinkNode.prototype._patchedResilientRequest = true;
+  const originalRawRequest = LavalinkNode.prototype.rawRequest;
+
+  LavalinkNode.prototype.rawRequest = async function (endpoint, modify) {
+    try {
+      return await originalRawRequest.call(this, endpoint, modify);
+    } catch (err) {
+      const isTimeout =
+        err.name === "TimeoutError" ||
+        err.code === "UND_ERR_HEADERS_TIMEOUT" ||
+        err.code === "UND_ERR_BODY_TIMEOUT" ||
+        err.message?.toLowerCase().includes("timeout") ||
+        err.message?.toLowerCase().includes("aborted");
+
+      if (isTimeout) {
+        logger.warn(`[LavalinkNode] REST request to "${endpoint}" timed out on node "${this.id}". Retrying once...`);
+        return await originalRawRequest.call(this, endpoint, modify);
+      }
+      throw err;
+    }
+  };
+}
+
+if (Player && Player.prototype && !Player.prototype._patchedResilientPlay) {
+  Player.prototype._patchedResilientPlay = true;
+  const originalPlay = Player.prototype.play;
+  const originalSkip = Player.prototype.skip;
+  const originalPause = Player.prototype.pause;
+  const originalResume = Player.prototype.resume;
+  const originalDestroy = Player.prototype.destroy;
+
+  Player.prototype.play = function (...args) {
+    const promise = (async () => {
+      try {
+        return await originalPlay.apply(this, args);
+      } catch (err) {
+        const isTimeout =
+          err.name === "TimeoutError" ||
+          err.message?.toLowerCase().includes("timeout") ||
+          err.message?.toLowerCase().includes("aborted");
+
+        if (isTimeout) {
+          logger.warn(`[Player] play() timed out in guild ${this.guildId}. Retrying with fresh request...`);
+          try {
+            return await originalPlay.apply(this, args);
+          } catch (retryErr) {
+            logger.error(`[Player] play() retry also failed in guild ${this.guildId}:`, retryErr?.message || retryErr);
+            throw retryErr;
+          }
+        }
+        throw err;
+      }
+    })();
+
+    // Catch floating/detached calls (e.g. autoSkip in lavalink-client) so they never trigger unhandledRejection
+    promise.catch((err) => {
+      logger.warn(`[Player] Handled background play() error for guild ${this.guildId}: ${err?.message || err}`);
+    });
+
+    return promise;
+  };
+
+  Player.prototype.skip = function (...args) {
+    const promise = originalSkip.apply(this, args);
+    if (promise && typeof promise.catch === "function") {
+      promise.catch((err) => {
+        logger.warn(`[Player] Handled background skip() error for guild ${this.guildId}: ${err?.message || err}`);
+      });
+    }
+    return promise;
+  };
+
+  Player.prototype.pause = function (...args) {
+    const promise = originalPause.apply(this, args);
+    if (promise && typeof promise.catch === "function") {
+      promise.catch((err) => {
+        logger.warn(`[Player] Handled background pause() error for guild ${this.guildId}: ${err?.message || err}`);
+      });
+    }
+    return promise;
+  };
+
+  Player.prototype.resume = function (...args) {
+    const promise = originalResume.apply(this, args);
+    if (promise && typeof promise.catch === "function") {
+      promise.catch((err) => {
+        logger.warn(`[Player] Handled background resume() error for guild ${this.guildId}: ${err?.message || err}`);
+      });
+    }
+    return promise;
+  };
+
+  Player.prototype.destroy = function (...args) {
+    const promise = originalDestroy.apply(this, args);
+    if (promise && typeof promise.catch === "function") {
+      promise.catch((err) => {
+        logger.warn(`[Player] Handled background destroy() error for guild ${this.guildId}: ${err?.message || err}`);
+      });
+    }
+    return promise;
+  };
+}
 
 /**
  * Initialize and attach optimized LavalinkManager to BotClient
@@ -64,10 +172,17 @@ function initLavalink(client) {
     },
   });
 
+  // Helper to ensure asynchronous event callbacks never throw unhandled rejections
+  const safeAsync = (fn) => (...args) => {
+    Promise.resolve(fn(...args)).catch((err) => {
+      logger.error("[Lavalink Event Error]:", err?.stack || err?.message || err);
+    });
+  };
+
   // ---------------------------------------------------------------------------
   // Lavalink Node Lifecycle Events & Session Resuming
   // ---------------------------------------------------------------------------
-  manager.nodeManager.on("connect", async (node) => {
+  manager.nodeManager.on("connect", safeAsync(async (node) => {
     logger.lavalink(
       `Connected to node: ${node.id} (${node.options.host}:${node.options.port}) [v${node.info?.version?.semver || "4.x"}]`
     );
@@ -85,7 +200,7 @@ function initLavalink(client) {
 
     // Auto-reconnect all permanent 24/7 channels across all configured servers
     await reconnect247(client);
-  });
+  }));
 
   manager.nodeManager.on("disconnect", (node, reason) => {
     logger.warn(`Lavalink node disconnected: ${node.id} - Reason:`, reason);
@@ -102,7 +217,7 @@ function initLavalink(client) {
   // ---------------------------------------------------------------------------
   // Player Audio Lifecycle Events
   // ---------------------------------------------------------------------------
-  manager.on("trackStart", (player, track) => emojis.runWithClient(client, async () => {
+  manager.on("trackStart", safeAsync((player, track) => emojis.runWithClient(client, async () => {
     if (!player.textChannelId) return;
     const channel = client.channels.cache.get(player.textChannelId);
 
@@ -142,19 +257,22 @@ function initLavalink(client) {
     if (!channel) return;
 
     try {
-      await sendOrUpdatePlayerDashboard(channel, player);
+      await sendOrUpdatePlayerDashboard(channel, player, true);
+      startRealtimeProgressLoop(player, client);
     } catch (err) {
       logger.error("Failed to send trackStart dashboard:", err.message);
     }
-  }));
+  })));
 
-  manager.on("trackEnd", (player, track) => emojis.runWithClient(client, async () => {
+  manager.on("trackEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
+    stopRealtimeProgressLoop(player);
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
     voiceStatusManager.onTrackEnd(client, player);
     presenceManager.onTrackEnd(client);
-  }));
+  })));
 
-  manager.on("trackStuck", (player, track, payload) => emojis.runWithClient(client, async () => {
+  manager.on("trackStuck", safeAsync((player, track, payload) => emojis.runWithClient(client, async () => {
+    stopRealtimeProgressLoop(player);
     logger.warn(`Track stuck: "${track.info.title}" in guild ${player.guildId} threshold ${payload.thresholdMs}ms`);
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
@@ -165,10 +283,11 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
       }
     }
-    await player.skip();
-  }));
+    await player.skip().catch(() => {});
+  })));
 
-  manager.on("trackError", (player, track, payload) => emojis.runWithClient(client, async () => {
+  manager.on("trackError", safeAsync((player, track, payload) => emojis.runWithClient(client, async () => {
+    stopRealtimeProgressLoop(player);
     logger.error(`Track error: "${track.info.title}" in guild ${player.guildId}:`, payload.error || payload.message);
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
@@ -179,10 +298,11 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
       }
     }
-    await player.skip();
-  }));
+    await player.skip().catch(() => {});
+  })));
 
-  manager.on("queueEnd", (player, track) => emojis.runWithClient(client, async () => {
+  manager.on("queueEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
+    stopRealtimeProgressLoop(player);
     logger.info(`Queue ended in guild ${player.guildId}`);
 
     // If Autoplay is enabled, execute fallback recommendation
@@ -199,6 +319,7 @@ function initLavalink(client) {
     }
 
     // Reset dedicated song request channel dashboard to ready state
+    player.set("ownerId", null);
     updateRequestChannelDashboard(client, player.guildId, null);
 
     // Set cool idle Voice Channel status while bot remains connected in voice
@@ -240,9 +361,11 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
       }
     }
-  }));
+  })));
 
-  manager.on("playerDestroy", (player) => emojis.runWithClient(client, () => {
+  manager.on("playerDestroy", safeAsync((player) => emojis.runWithClient(client, () => {
+    stopRealtimeProgressLoop(player);
+    player.set("ownerId", null);
     logger.debug(`Player destroyed for guild ${player.guildId}`);
     updateRequestChannelDashboard(client, player.guildId, null);
     voiceStatusManager.clearVoiceStatus(client, player.voiceChannelId, player.guildId);
@@ -254,7 +377,7 @@ function initLavalink(client) {
         channel.messages.delete(prevMsgId).catch(() => {});
       }
     }
-  }));
+  })));
 
   return manager;
 }

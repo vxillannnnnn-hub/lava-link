@@ -26,6 +26,14 @@ module.exports = {
     await player.resume();
     voiceStatusManager.onResume(client, player);
 
+    // Update now playing dashboard immediately and restart real-time progress loop
+    const { sendOrUpdatePlayerDashboard, startRealtimeProgressLoop } = require("../../utils/playerController");
+    if (player.textChannelId) {
+      const channel = client.channels.cache.get(player.textChannelId);
+      if (channel) sendOrUpdatePlayerDashboard(channel, player).catch(() => {});
+    }
+    startRealtimeProgressLoop(player, client);
+
     const trackTitle = truncate(cleanTrackTitle(player.queue.current?.info?.title) || "Current Track", 40);
 
     return interaction.reply(

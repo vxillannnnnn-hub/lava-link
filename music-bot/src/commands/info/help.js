@@ -71,6 +71,8 @@ function getCategoryEmbed(category, client) {
         .setTitle(`${emojis.gear} System & Server Admin Controls`)
         .setDescription("Bot connectivity, diagnostics, and server configuration:")
         .addFields(
+          { name: "`/settings [view/multi-ownership]`", value: "View guild audio settings and configure Jockie multi-bot anti-hogging policies." },
+          { name: "`/prefix [new]`", value: "View or change the server text command prefix (e.g. '.', '!')." },
           { name: "`/setup-channel [channel]`", value: "Configure a dedicated song-request channel with permanent Eara player." },
           { name: "`/dj [set/toggle/status/clear]`", value: "Configure server DJ role and fair-queue protection." },
           { name: "`/join` & `/leave`", value: "Summon or disconnect the bot from voice channels (Supports Stage channels)." },

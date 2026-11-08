@@ -50,7 +50,8 @@ const UNICODE_FALLBACKS = {
   spotify: "♫",
   youtube: "▶",
   soundcloud: "☁",
-  openPlayer: "⏏",
+  openPlayer: "🎛",
+  controls: "🎛",
   pointer: "›",
 };
 
@@ -70,7 +71,8 @@ const EMOJI_CONFIG = {
   autoplay: "<:autoplay:1568636927987421194>",
   save: "<:heart:1568636935508066304>",
   heart: "<:heart:1568636935508066304>",
-  openPlayer: "⏏",
+  openPlayer: "<:controls:1568865458659131472>",
+  controls: "<:controls:1568865458659131472>",
   queue: "<:queue:1568636942785056779>",
 
   // ---------------------------------------------------------------------------
@@ -179,6 +181,166 @@ try {
   }
 } catch (_) {}
 
+// Canonical alias dictionary to map all command/embed/button property names
+// to the actual Discord Application Emoji keys owned by each respective bot
+const CANONICAL_ALIASES = {
+  // Player Transport & Controls
+  play: "play",
+  pause: "pause",
+  playpause: "playpause",
+  previous: "previous",
+  skip: "skip",
+  stop: "stop",
+  clear: "stop",
+  leave: "stop",
+  wave: "stop",
+  loop: "loop",
+  reset: "loop",
+  loopOne: "loop_one",
+  loop_one: "loop_one",
+  shuffle: "shuffle",
+  autoplay: "autoplay",
+  save: "heart",
+  heart: "heart",
+  queue: "queue",
+  playlist: "queue",
+  scroll: "queue",
+  book: "queue",
+  openPlayer: "controls",
+  controls: "controls",
+
+  // Volume & Audio Levels
+  volume: "volume",
+  volumeNormal: "volume",
+  volumeBoost: "volume",
+  audio: "volume",
+  stats: "volume",
+  equalizer: "volume",
+  volumeLow: "volumelow",
+  volumelow: "volumelow",
+  volumeMute: "volumemute",
+  volumemute: "volumemute",
+
+  // System Status, Alerts & Badges
+  success: "check",
+  check: "check",
+  online: "check",
+  vote: "check",
+  error: "cross",
+  cross: "cross",
+  warn: "cross",
+  alert: "cross",
+  offline: "cross",
+  sparkles: "sparkles",
+  help: "sparkles",
+  pin: "sparkles",
+  fire: "fire",
+  live: "radio",
+  ping: "radio",
+  radio: "radio",
+  disc: "disc",
+  time: "disc",
+  bandcamp: "disc",
+  web: "disc",
+  stream: "disc",
+  dj: "dj",
+  user: "dj",
+  gear: "dj",
+  settings: "dj",
+  music: "music",
+  info: "music",
+  lyrics: "music",
+  search: "music",
+  link: "music",
+  mic: "music",
+  guitar: "music",
+
+  // Streaming Platforms
+  spotify: "spotify",
+  youtube: "youtube",
+  soundcloud: "soundcloud",
+  jiosaavn: "music",
+  twitch: "radio",
+
+  // DSP Audio Filters
+  filter8D: "dj",
+  filterBass: "volume",
+  filterNightcore: "sparkles",
+  filterVaporwave: "disc",
+  filterKaraoke: "music",
+  filterPop: "music",
+  filterRock: "music",
+  filterNormalizer: "disc",
+  filterReset: "loop",
+
+  // Seamless Progress Bar Blocks
+  bar_lf: "bar_lf",
+  bar_mf: "bar_mf",
+  bar_rf: "bar_rf",
+  bar_le: "bar_le",
+  bar_me: "bar_me",
+  bar_re: "bar_re",
+  bar_single_f: "bar_single_f",
+
+  // Pointer
+  pointer: "pointer",
+};
+
+const PRIMARY_BOT_ID = "1568193148222443591";
+
+/**
+ * Robust contextual emoji resolver for multi-bot fleet.
+ * Guaranteed to NEVER send another bot's application emoji tag across external servers.
+ */
+function resolveEmoji(prop, client = null) {
+  if (typeof prop !== "string") return "";
+
+  // 1. Literal Unicode Glyphs that do not require Discord Custom Emojis
+  if (prop === "pointer") return "›";
+
+  // 2. Global fallback mode check
+  if (isFallbackMode && UNICODE_FALLBACKS[prop]) {
+    return UNICODE_FALLBACKS[prop];
+  }
+
+  // 3. Resolve active client & bot user ID
+  const targetClient = client || clientContext.getStore() || null;
+  const botId = targetClient?.user?.id || (typeof targetClient === "string" ? targetClient : null);
+
+  const canonicalKey = CANONICAL_ALIASES[prop] || prop;
+  const lowerProp = prop.toLowerCase();
+  const lowerCanonical = canonicalKey.toLowerCase();
+
+  // 4. Check client's in-memory emojisMap (live-fetched from Discord REST API on ready)
+  if (targetClient?.emojisMap) {
+    const map = targetClient.emojisMap;
+    if (map[prop]) return map[prop];
+    if (map[canonicalKey]) return map[canonicalKey];
+    if (map[lowerProp]) return map[lowerProp];
+    if (map[lowerCanonical]) return map[lowerCanonical];
+  }
+
+  // 5. Check pre-loaded fleet mapping from applicationEmojis.json
+  if (botId && fleetEmojis[botId]) {
+    const botMap = fleetEmojis[botId];
+    if (botMap[prop]) return botMap[prop];
+    if (botMap[canonicalKey]) return botMap[canonicalKey];
+    if (botMap[lowerProp]) return botMap[lowerProp];
+    if (botMap[lowerCanonical]) return botMap[lowerCanonical];
+  }
+
+  // 6. Primary bot fallback (Bot 1 owns the hardcoded EMOJI_CONFIG)
+  if (!botId || botId === PRIMARY_BOT_ID) {
+    if (EMOJI_CONFIG[prop]) return EMOJI_CONFIG[prop];
+    if (EMOJI_CONFIG[canonicalKey]) return EMOJI_CONFIG[canonicalKey];
+  }
+
+  // 7. Auxiliary / Clone Bots (Pulse 1, 2, 3, etc.):
+  // NEVER leak Bot 1's alien application emoji tags into messages sent by other bots!
+  // Discord will reject them and show broken text. Fall back to clean Unicode glyphs.
+  return UNICODE_FALLBACKS[canonicalKey] || UNICODE_FALLBACKS[prop] || "";
+}
+
 // Unified shared dictionary supporting both top-level and categorized access
 const emojis = {
   ...EMOJI_CONFIG,
@@ -209,6 +371,12 @@ const emojis = {
       low: proxyEmojis.volumeLow,
       normal: proxyEmojis.volumeNormal,
       boost: proxyEmojis.volumeBoost,
+      toString() {
+        return resolveEmoji("volume");
+      },
+      [Symbol.toPrimitive]() {
+        return resolveEmoji("volume");
+      },
     };
   },
 
@@ -352,18 +520,7 @@ const emojis = {
    * Resolve appropriate emoji for a specific bot client in the multi-bot fleet
    */
   getEmoji(key, client = null) {
-    if (isFallbackMode) {
-      return UNICODE_FALLBACKS[key] || "•";
-    }
-    const targetClient = client || clientContext.getStore();
-    const botId = targetClient?.user?.id || (typeof targetClient === "string" ? targetClient : null);
-    if (botId && fleetEmojis[botId]?.[key]) {
-      return fleetEmojis[botId][key];
-    }
-    if (targetClient?.emojisMap?.[key]) {
-      return targetClient.emojisMap[key];
-    }
-    return EMOJI_CONFIG[key] || UNICODE_FALLBACKS[key] || "";
+    return resolveEmoji(key, client);
   },
 
   /**
@@ -375,13 +532,24 @@ const emojis = {
     if (isFallbackMode) {
       return UNICODE_FALLBACKS[key] || "•";
     }
-    const raw = this.getEmoji(key, client);
+    const raw = resolveEmoji(key, client);
     if (!raw) return UNICODE_FALLBACKS[key] || "•";
     const match = raw.match(/<a?:([a-zA-Z0-9_]+):(\d+)>/);
     if (match) {
       return { name: match[1], id: match[2] };
     }
     return raw;
+  },
+
+  /**
+   * Register live application emojis fetched from Discord API for a specific bot instance
+   */
+  registerBotEmojis(botId, emojiMap) {
+    if (!botId || !emojiMap) return;
+    fleetEmojis[botId] = {
+      ...(fleetEmojis[botId] || {}),
+      ...emojiMap,
+    };
   },
 
   /**
@@ -426,18 +594,23 @@ const proxyEmojis = new Proxy(emojis, {
     if (typeof prop !== "string") {
       return Reflect.get(target, prop, receiver);
     }
-    if (isFallbackMode && UNICODE_FALLBACKS[prop]) {
-      return UNICODE_FALLBACKS[prop];
+    // Return functions and specific namespace objects directly from target
+    if (prop in target && typeof target[prop] === "function") {
+      return target[prop];
     }
-    const currentClient = clientContext.getStore();
-    const botId = currentClient?.user?.id || (typeof currentClient === "string" ? currentClient : null);
-    if (botId && fleetEmojis[botId]?.[prop]) {
-      return fleetEmojis[botId][prop];
+    if (
+      prop === "player" ||
+      prop === "volume" ||
+      prop === "filters" ||
+      prop === "platforms" ||
+      prop === "status" ||
+      prop === "progress" ||
+      prop === "unicode" ||
+      prop === "cdnBase"
+    ) {
+      return Reflect.get(target, prop, receiver);
     }
-    if (currentClient?.emojisMap?.[prop]) {
-      return currentClient.emojisMap[prop];
-    }
-    return Reflect.get(target, prop, receiver);
+    return resolveEmoji(prop);
   },
 });
 
