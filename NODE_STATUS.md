@@ -1,7 +1,7 @@
 # 🟢 Live Public Lavalink Node
 > **Status**: ONLINE 🟢  
-> **Session Run**: #55  
-> **Last Started**: 2026-11-09 06:08:09 UTC
+> **Session Run**: #56  
+> **Last Started**: 2026-11-09 06:55:26 UTC
 ### 🌐 Public Connection Details
 | Setting | Value |
 |---|---|
@@ -11,5 +11,5 @@
 | **SSL / Secure** | `true` |
 | **REST URI** | `https://lavalink.opendrive.indevs.in` |
 | **WebSocket URI** | `wss://lavalink.opendrive.indevs.in:443/v4/websocket` |
-| **GC Engine** | `Java 21 Generational ZGC (<1ms pauses)` |
-| **Transport** | `Netty Native Linux Epoll` |
+| **GC Engine** | `Java 25 Generational ZGC (<1ms pauses)` |
+| **Transport** | `Netty Native Linux Epoll + koe 3.1.0 (PR #1235)` |
