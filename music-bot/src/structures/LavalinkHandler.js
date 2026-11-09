@@ -152,7 +152,10 @@ function initLavalink(client) {
     autoSkipOnResolveError: true, // Never freeze on corrupt audio chunks
     emitNewSongsOnly: true,
     playerOptions: {
-      defaultSearchPlatform: config.player.defaultSearchPlatform,
+      // Metadata-only platforms either serve 30s previews or force a mirror
+      // lookup, so playback defaults to Opus-native YouTube Music unless the
+      // operator explicitly allows a metadata platform.
+      defaultSearchPlatform: audioQuality.resolvePlaybackPlatform(),
       applyVolumeAsFilter: false, // Opus Direct Passthrough: skip PCM transcoding when volume = 100
       minAutoPlayMs: config.player.minAutoPlayMs, // anti-spam guard between autoplay hand-offs
       onDisconnect: {
@@ -179,12 +182,14 @@ function initLavalink(client) {
     },
   });
 
-  // Warn when playback is pinned to a metadata-only platform: those streams are
-  // mirrors that often have to be re-encoded, while YouTube Music ships Opus and
-  // is forwarded to Discord untouched.
-  if (audioQuality.isMetadataOnlyPlatform(config.player.defaultSearchPlatform)) {
+  // Metadata-only platforms are only metadata: the audio is either a 30 second
+  // preview or a mirror that has to be re-encoded. YouTube Music ships Opus,
+  // which Lavalink forwards to Discord bit-exact, so playback falls back to it.
+  const configuredPlatform = config.player.defaultSearchPlatform;
+  const playbackPlatform = audioQuality.resolvePlaybackPlatform();
+  if (playbackPlatform !== configuredPlatform) {
     logger.warn(
-      `[AudioQuality] DEFAULT_SEARCH_PLATFORM is "${config.player.defaultSearchPlatform}" (metadata-only). For maximum fidelity set DEFAULT_SEARCH_PLATFORM=ytmsearch; previews from this platform will still be repaired automatically.`
+      `[AudioQuality] DEFAULT_SEARCH_PLATFORM="${configuredPlatform}" is metadata-only (30s previews or re-encoded mirrors). Playing from "${playbackPlatform}" instead for bit-exact Opus. Set ALLOW_METADATA_SOURCE=true to force the configured platform.`
     );
   }
 

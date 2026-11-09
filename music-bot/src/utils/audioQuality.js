@@ -83,6 +83,25 @@ function isMetadataOnlyPlatform(value) {
 }
 
 /**
+ * The platform playback should actually use.
+ *
+ * A metadata-only default (Spotify, Deezer, ...) either returns 30 second
+ * previews or needs a second mirror lookup that lands on a re-encoded stream.
+ * Neither is what a user asked for by typing a song name, so playback falls
+ * back to YouTube Music (Opus) unless the operator explicitly opts in.
+ *
+ * @param {string} [configured] configured platform / search prefix
+ * @returns {string} platform to search with
+ */
+function resolvePlaybackPlatform(configured = config.player.defaultSearchPlatform) {
+  const value = String(configured || "").toLowerCase().trim();
+  if (!value) return "ytmsearch";
+  if (!isMetadataOnlyPlatform(value)) return value;
+  if (quality.allowMetadataOnlySource === true) return value;
+  return "ytmsearch";
+}
+
+/**
  * Spotify/Deezer previews are exactly ~30s and are the classic "the bot plays
  * the wrong thing / cuts off after 30 seconds" symptom.
  */
@@ -225,6 +244,7 @@ module.exports = {
   METADATA_ONLY_SOURCES,
   METADATA_ONLY_SEARCH_PREFIXES,
   MIN_REAL_TRACK_DURATION_MS,
+  resolvePlaybackPlatform,
   isMetadataOnlyPlatform,
   isMetadataOnlyTrack,
   isPreviewTrack,

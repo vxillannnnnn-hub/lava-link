@@ -93,7 +93,7 @@ module.exports = {
 
       let formattedQuery = query;
       if (!isUrl && !isPrefixed) {
-        const prefix = forcedSource || config.player.defaultSearchPlatform;
+        const prefix = forcedSource || audioQuality.resolvePlaybackPlatform();
         formattedQuery = `${prefix}:${query}`;
       }
 

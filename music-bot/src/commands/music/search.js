@@ -13,6 +13,7 @@ const { getPlatformTheme, cleanTrackTitle } = require("../../utils/sourceManager
 const { handleSearchAutocomplete } = require("../../utils/searchAutocomplete");
 const emojis = require("../../utils/emojis");
 const config = require("../../config");
+const audioQuality = require("../../utils/audioQuality");
 
 // Store active search results in memory temporarily
 const activeSearches = new Map();
@@ -49,7 +50,7 @@ module.exports = {
 
   async execute(interaction, client) {
     const query = interaction.options.getString("query");
-    const forcedSource = interaction.options.getString("source") || config.player.defaultSearchPlatform;
+    const forcedSource = interaction.options.getString("source") || audioQuality.resolvePlaybackPlatform();
     const member = interaction.member;
     const voiceChannel = member?.voice?.channel;
 

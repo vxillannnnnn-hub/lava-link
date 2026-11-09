@@ -14,7 +14,7 @@ module.exports = {
         .setRequired(true)
         .addChoices(
           { name: "Reset / Clean Passthrough (0ms Opus Direct)", value: "reset" },
-          { name: "Sound Normalizer / Dynamic Limiter (Auto-Level Loudness)", value: "normalizer" },
+          { name: "Passthrough (No Filters - Best Quality)", value: "normalizer" },
           { name: "8D Spatial Audio (Orbital 360° Panning)", value: "8d" },
           { name: "Bass Boost (Low)", value: "bass_low" },
           { name: "Bass Boost (Medium)", value: "bass_med" },
@@ -52,16 +52,17 @@ module.exports = {
         );
 
       case "normalizer":
+        // Lavalink has no loudness normaliser, and a real one would have to
+        // decode every track anyway. The old ±0.05dB EQ was inaudible but
+        // still forced PCM decode + Opus re-encode on the node - a pure
+        // quality loss - so this preset now restores the passthrough path.
         await player.filterManager.resetFilters();
-        await player.filterManager.setEQ([
-          { band: 0, gain: 0.05 },
-          { band: 1, gain: 0.05 },
-          { band: 2, gain: 0.00 },
-          { band: 3, gain: -0.05 },
-          { band: 4, gain: -0.05 },
-        ]);
         return interaction.reply(
-          actionText(emojis.filters.normalizer, "Activated **Sound Normalizer** filter.", "Dynamic limiter evens out track volumes")
+          actionText(
+            emojis.filters.normalizer,
+            "Passthrough restored - no DSP applied.",
+            "Loudness normalisation needs a full decode, so it is intentionally not applied. Bit-exact Opus is the highest fidelity path."
+          )
         );
 
       case "8d":

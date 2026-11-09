@@ -14,13 +14,25 @@
 #   Always run the newest 4.2.x release, not a pinned 4.2.2 jar.
 #
 # JVM (the flags matter as much as the yml):
-#   java -XX:+UseZGC -XX:+ZGenerational -Xms1G -Xmx1G \
-#        -XX:+AlwaysPreTouch -XX:+PerfDisableSharedMem \
-#        -jar Lavalink.jar
+#   java -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -Xms1G -Xmx1G \
+#        -XX:+AlwaysPreTouch -jar Lavalink.jar
+#   On Java 21+ you can use ZGC instead (lower pauses, needs a little more RAM):
+#   java -XX:+UseZGC -XX:+ZGenerational -Xms1G -Xmx1G -jar Lavalink.jar
 #   - Never run Lavalink on a CPU-limited/throttled shared runner; frame drops
 #     come from CPU starvation and GC pauses, not from the bot process.
-#   - Put the node in the same region as the voice channels it serves. The audio
-#     path is Node -> Discord voice server (UDP), not Node -> your bot.
+#   - Put the node in the same region as the voice channels it serves, on a
+#     wired datacenter link. The audio path is Node -> Discord voice server
+#     (UDP) and never passes through the bot; home internet, WiFi or a tunnel
+#     in front of the node shows up as jitter/stutter that no buffer fully fixes.
+#
+# WHY OPUS PASSTHROUGH IS THE WHOLE GAME
+#   Lavalink forwards the source's Opus packets to Discord untouched when the
+#   track already is Opus (YouTube/YouTube Music, SoundCloud) AND volume is
+#   exactly 100 AND no filter is active. Any digital gain or DSP forces
+#   decode -> resample -> encode, which is a second lossy generation and is
+#   capped by the channel bitrate. opusEncodingQuality/resamplingQuality below
+#   only apply to those transcoded paths - they can never improve a passthrough
+#   track, which is already bit-exact.
 ###############################################################################
 
 server: # REST and WS server
@@ -34,7 +46,9 @@ lavalink:
     # are forwarded without re-encoding.
     # OAuth on the TV client is what keeps playback stable and full quality from
     # datacenter IPs - see https://github.com/lavalink-devs/youtube-source
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
+    # 1.18.x carries the format/SABR fixes: older builds can stop finding Opus
+    # streams and silently fall back to AAC (which then has to be transcoded).
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       snapshot: false
     # Spotify / Apple Music / Deezer / Tidal metadata + full-length audio mirror.
     # WITHOUT spotify credentials `spsearch:` only returns 30 second previews.
@@ -76,18 +90,22 @@ lavalink:
     # How much decoded audio is kept buffered. 5000ms = resilient to jitter.
     frameBufferDurationMs: 5000
     # Opus encoder quality, 0-10. Only used when the source is NOT already Opus
-    # (mirrors, MP3 streams, livestreams). 10 = best fidelity.
+    # (mirrors, MP3/AAC streams, livestreams, or any track with volume != 100).
+    # 10 = best fidelity; it has zero effect on passthrough tracks.
     opusEncodingQuality: 10
-    # Resampling quality, LOW/MEDIUM/HIGH. HIGH costs CPU but removes the
-    # "muffled / metallic" character of 44.1kHz -> 48kHz resampling.
-    resamplingQuality: MEDIUM
-    # Detect a stalled stream sooner so the bot skips a broken track instead of
-    # leaving the channel silent.
-    trackStuckThresholdMs: 5000
+    # Resampling quality, LOW/MEDIUM/HIGH. Also transcode-only, but it is the
+    # one thing that removes the "muffled / metallic" character of
+    # 44.1kHz -> 48kHz material (SoundCloud, MP3/AAC mirrors).
+    resamplingQuality: HIGH
+    # How long a track may deliver no audio before it is treated as stuck.
+    # 10s is Lavalink's default; a lower value skips slow-starting tracks and is
+    # heard as the song randomly cutting out.
+    trackStuckThresholdMs: 10000
     # Seek while the buffered audio keeps playing - no gap when users seek.
     useSeekGhosting: true
-    # Accurate playback position for progress bars and resume-after-restart.
-    playerUpdateInterval: 1
+    # Player position updates per second. 1/sec per player is a needless stream
+    # of WS traffic on a busy node; 5 is the default and plenty for progress bars.
+    playerUpdateInterval: 5
     youtubePlaylistLoadLimit: 6
     gc-warnings: true
 
@@ -102,12 +120,18 @@ plugins:
     #   oauth:
     #     enabled: true
     #     refreshToken: "YOUR_REFRESH_TOKEN"
+    # MUSIC first: it is the only client that understands `ytmsearch:`.
+    # Everything after it is Opus-capable, so a loaded track is forwarded
+    # without transcoding (IOS/ANDROID/MEDIA_CONNECT are intentionally absent:
+    # they return no Opus formats and force a re-encode).
     clients:
       - MUSIC
+      - ANDROID_VR
+      - ANDROID_MUSIC
+      - TVHTML5_SIMPLY
       - WEB
       - MWEB
-      - TVHTML5_SIMPLY
-      - ANDROID_VR
+      - WEBEMBEDDED
 
   lavasrc:
     providers:

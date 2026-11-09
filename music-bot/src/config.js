@@ -51,6 +51,10 @@ module.exports = {
       // Opus source (best quality, costs one extra search per track).
       upgradeMetadataOnlySources: process.env.UPGRADE_METADATA_SOURCES === "true",
       metadataOnlySources: ["spotify", "deezer", "applemusic", "tidal", "jiosaavn", "yandexmusic", "flowery-tts"],
+      // Playback refuses a metadata-only DEFAULT_SEARCH_PLATFORM (it serves 30s
+      // previews or forces a mirror search) and uses YouTube Music's Opus
+      // stream instead. Set this to true only if you really want that platform.
+      allowMetadataOnlySource: process.env.ALLOW_METADATA_SOURCE === "true",
       previewMaxDurationMs: parseInt(process.env.PREVIEW_MAX_DURATION_MS || "31000", 10), // anything <= 31s is a preview
       upgradeTimeoutMs: parseInt(process.env.UPGRADE_TIMEOUT_MS || "4000", 10), // never add more than 4s of start latency
     },
