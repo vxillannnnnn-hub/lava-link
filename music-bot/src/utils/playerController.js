@@ -298,16 +298,8 @@ async function sendOrUpdatePlayerDashboard(channel, player, forceBottom = false)
     const prevMsgId = player.get("nowPlayingMsgId");
 
     if (prevMsgId) {
-      // Always delete the old dashboard message first for clean repositioning
-      try {
-        const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
-        if (prevMsg && prevMsg.deletable) {
-          await prevMsg.delete().catch(() => {});
-        }
-      } catch (_) {}
-
       if (!forceBottom) {
-        // Normal progress tick: edit the now-deleted message position
+        // Normal 5s progress tick: smooth in-place edit with 0ms screen flicker
         try {
           const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
           if (prevMsg && prevMsg.editable) {
@@ -315,14 +307,23 @@ async function sendOrUpdatePlayerDashboard(channel, player, forceBottom = false)
           }
         } catch (_) {}
       } else {
-        // forceBottom: send fresh dashboard at channel bottom
-        try {
-          const msg = await channel.send(payload);
-          player.set("nowPlayingMsgId", msg.id);
-          return msg;
-        } catch (err) {
-          logger.debug("Failed to send dashboard:", err.message);
-          return null;
+        // forceBottom requested (e.g. user chat arrived below embed):
+        // Only delete & resend if newer messages were actually posted in the channel
+        if (channel.lastMessageId && channel.lastMessageId !== prevMsgId) {
+          try {
+            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
+            if (prevMsg && prevMsg.deletable) {
+              await prevMsg.delete().catch(() => {});
+            }
+          } catch (_) {}
+        } else {
+          // Still at bottom, smooth in-place edit
+          try {
+            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
+            if (prevMsg && prevMsg.editable) {
+              return await prevMsg.edit(payload);
+            }
+          } catch (_) {}
         }
       }
     }
