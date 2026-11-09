@@ -124,7 +124,7 @@ jobs:
         if: matrix.component == 'lavalink'
         run: |
           set -e
-          CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/download/2024.10.0/cf_8749c66/cloudflared-linux-amd64"
+          CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/download/2026.10.0/cloudflared-linux-amd64"
           MAX_RETRIES=3
           RETRY_DELAY=3
           SUCCESS=false
