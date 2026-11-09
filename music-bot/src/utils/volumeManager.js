@@ -74,10 +74,25 @@ function describe(result) {
   return `Volume set to **${result.applied}%** (attenuated, no clipping).`;
 }
 
+
+/** 
+ * Set crossfade duration for smooth transitions between tracks.
+ * @param {import("lavalink-client").Player} player
+ * @param {number} durationMs Crossfade duration in milliseconds (0-30000)
+ */
+async function setCrossfade(player, durationMs) {
+  const duration = Math.max(0, Math.min(durationMs || 0, 30000));
+  await player.setCrossfade(duration);
+  player.set("crossfadeDuration", duration);
+  return duration;
+}
+
+
 module.exports = {
   UNITY_VOLUME,
   clampVolume,
   applyVolume,
+  setCrossfade,
   capNotice,
   describe,
 };

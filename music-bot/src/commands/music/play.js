@@ -169,7 +169,7 @@ module.exports = {
           return interaction.editReply(
             actionWithButton(
               theme.badge || emojis.music,
-              `Now playing [**${cleanTitle}**](${uri}) by **${cleanAuthor}**`,
+              `Now playing **${cleanTitle}** by **${cleanAuthor}**`,
               `${theme.name} • \`${duration}\` • Requested by <@${interaction.user.id}>`,
               { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Secondary }
             )
@@ -179,7 +179,7 @@ module.exports = {
         return interaction.editReply(
           actionWithButton(
             emojis.check,
-            `Added [**${cleanTitle}**](${uri}) to queue (\`#${position}\`)`,
+            `Added **${cleanTitle}** to queue (\`#${position}\`)`,
             `${cleanAuthor} • \`${duration}\` • Requested by <@${interaction.user.id}>`,
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary }
           )

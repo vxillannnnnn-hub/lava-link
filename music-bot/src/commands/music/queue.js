@@ -90,7 +90,7 @@ module.exports = {
             const duration = formatDuration(t.info.duration);
             const cleanTitle = truncate(cleanTrackTitle(t.info.title), 40);
             const cleanAuthor = truncate(t.info.author, 20);
-            return `\`${index}.\` [${cleanTitle}](${t.info.uri || "https://discord.com"}) - \`${cleanAuthor}\` (\`${duration}\`)`;
+            return `\`${index}.\` ${cleanTitle} - \`${cleanAuthor}\` (\`${duration}\`)`;
           })
           .join("\n");
 

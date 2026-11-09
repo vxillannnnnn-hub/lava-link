@@ -137,7 +137,20 @@ module.exports = {
     tracks.forEach((track, index) => {
       const cleanTitle = truncate(cleanTrackTitle(track.info.title), 40);
       const cleanAuthor = truncate(track.info.author, 22);
-      const duration = formatDuration(track.info.duration);
+      const duration = track.info.duration;
+      const durationDisplay = formatDuration(duration);
+      // Duration badge: LIVE, SHORT, or LONG
+      let durationBadge = "";
+      if (track.info.isStream) {
+        durationBadge = emojis.live + " LIVE";
+      } else if (duration && duration > 0) {
+        const durMinutes = Math.round(duration / 60000);
+        if (durMinutes <= 3) {
+          durationBadge = emojis.short + " Short";
+        } else if (durMinutes > 10) {
+          durationBadge = emojis.long + " Long";
+        }
+      }
 
       selectMenu.addOptions(
         new StringSelectMenuOptionBuilder()
@@ -148,7 +161,7 @@ module.exports = {
       );
 
       descriptionLines.push(
-        `\`${index + 1}.\` [${cleanTitle}](${track.info.uri || "https://discord.com"}) - \`${cleanAuthor}\` (\`${duration}\`)`
+        `\`${index + 1}.\` ${cleanTitle}) - \`${cleanAuthor}\` (\`${duration}\`)`
       );
     });
 

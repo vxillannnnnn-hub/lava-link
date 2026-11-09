@@ -298,8 +298,16 @@ async function sendOrUpdatePlayerDashboard(channel, player, forceBottom = false)
     const prevMsgId = player.get("nowPlayingMsgId");
 
     if (prevMsgId) {
+      // Always delete the old dashboard message first for clean repositioning
+      try {
+        const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
+        if (prevMsg && prevMsg.deletable) {
+          await prevMsg.delete().catch(() => {});
+        }
+      } catch (_) {}
+
       if (!forceBottom) {
-        // Normal 5s progress tick: smooth in-place edit with 0ms screen flicker
+        // Normal progress tick: edit the now-deleted message position
         try {
           const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
           if (prevMsg && prevMsg.editable) {
@@ -307,23 +315,14 @@ async function sendOrUpdatePlayerDashboard(channel, player, forceBottom = false)
           }
         } catch (_) {}
       } else {
-        // forceBottom requested (e.g. user chat arrived below embed):
-        // Only delete & resend if newer messages were actually posted in the channel
-        if (channel.lastMessageId && channel.lastMessageId !== prevMsgId) {
-          try {
-            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
-            if (prevMsg && prevMsg.deletable) {
-              await prevMsg.delete().catch(() => {});
-            }
-          } catch (_) {}
-        } else {
-          // Still at bottom, smooth in-place edit
-          try {
-            const prevMsg = await channel.messages.fetch(prevMsgId).catch(() => null);
-            if (prevMsg && prevMsg.editable) {
-              return await prevMsg.edit(payload);
-            }
-          } catch (_) {}
+        // forceBottom: send fresh dashboard at channel bottom
+        try {
+          const msg = await channel.send(payload);
+          player.set("nowPlayingMsgId", msg.id);
+          return msg;
+        } catch (err) {
+          logger.debug("Failed to send dashboard:", err.message);
+          return null;
         }
       }
     }
@@ -762,7 +761,10 @@ async function handlePlayerButton(interaction, client) {
       const newAutoplay = !currentAutoplay;
       player.set("autoplay", newAutoplay);
 
+      // Persist the seed track identifier for autoplay across bot restarts
       const seedTrack = player.queue.current || player.queue.previous[0] || player.get("lastPlayedTrack");
+      player.set("autoplaySeedTrack", seedTrack?.info?.identifier || null);
+
       if (newAutoplay && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
           await autoplayManager.executeAutoplay(player, seedTrack, false);
@@ -897,6 +899,16 @@ async function handlePlayerButton(interaction, client) {
         allowedMentions: { parse: [], users: [] },
       });
     }
+    case "ctrl_crossfade": {
+      if (!checkDJ(false)) return;
+      const seconds = Math.max(0, Math.min(10, Number(interaction.options.getString("duration")) || 3));
+      await volumeManager.setCrossfade(player, seconds * 1000);
+      return interaction.followUp({
+        content: `${emojis.crossfade} Crossfade set to **${seconds}** second${seconds !== 1 ? "s" : ""}`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
 
     case "btn_loop": {
       if (!checkDJ(false)) return;
@@ -934,8 +946,10 @@ async function handlePlayerButton(interaction, client) {
       const newAutoplay = !currentAutoplay;
       player.set("autoplay", newAutoplay);
 
-      // Pre-fetch next recommendation if queue is empty
+      // Persist the seed track identifier for autoplay across bot restarts
       const seedTrack = player.queue.current || player.queue.previous[0] || player.get("lastPlayedTrack");
+      player.set("autoplaySeedTrack", seedTrack?.info?.identifier || null);
+
       if (newAutoplay && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
           // If queue ended already, immediately start autoplaying!
