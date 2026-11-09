@@ -123,9 +123,40 @@ jobs:
       - name: Install Cloudflare Tunnel (cloudflared)
         if: matrix.component == 'lavalink'
         run: |
-          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-          chmod +x /usr/local/bin/cloudflared
-          cloudflared --version
+          set -e
+          CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/download/2024.10.0/cf_8749c66/cloudflared-linux-amd64"
+          MAX_RETRIES=3
+          RETRY_DELAY=3
+          SUCCESS=false
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $attempt/$MAX_RETRIES to download cloudflared..."
+            if curl -sSL --retry 2 --retry-delay $RETRY_DELAY --connect-timeout 15 --max-time 60 "$CLOUDFLARED_URL" -o /usr/local/bin/cloudflared; then
+              if chmod +x /usr/local/bin/cloudflared && [ -x /usr/local/bin/cloudflared ]; then
+                echo "✅ cloudflared installed successfully on attempt $attempt"
+                cloudflared --version
+                SUCCESS=true
+                break
+              else
+                echo "Download succeeded but binary is not executable, retrying..."
+              fi
+            else
+              echo "Download failed on attempt $attempt"
+            fi
+            if [ $attempt -lt $MAX_RETRIES ]; then
+              echo "Retrying in ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            fi
+          done
+          if [ "$SUCCESS" = "false" ]; then
+            echo "::warning::Failed to download cloudflared after $MAX_RETRIES attempts. Tunnel features will be unavailable."
+            echo "Falling back to alternative download method..."
+            if wget -q --timeout=30 --tries=3 "$CLOUDFLARED_URL" -O /usr/local/bin/cloudflared; then
+              chmod +x /usr/local/bin/cloudflared
+              cloudflared --version || echo "⚠️  Binary downloaded but version check failed"
+            else
+              echo "::warning::All download methods failed. Cloudflare tunnel will not be available."
+            fi
+          fi
 
       - name: Start Lavalink Node (Java 21 Generational ZGC Ultra-Low Latency)
         if: matrix.component == 'lavalink'
