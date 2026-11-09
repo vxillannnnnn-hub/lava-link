@@ -1,34 +1,5 @@
 {
-  "savedAt": 1794118991157,
-  "count": 2,
-  "sessions": [
-    {
-      "guildId": "1524739596670337197",
-      "botUserId": "1568193148222443591",
-      "voiceChannelId": "1524739599082066115",
-      "textChannelId": "1524739598935396421",
-      "position": 16618445,
-      "paused": false,
-      "volume": 100,
-      "repeatMode": "off",
-      "autoplay": false,
-      "is247": true,
-      "currentTrack": null,
-      "queue": []
-    },
-    {
-      "guildId": "1555968929023664208",
-      "botUserId": "1568193148222443591",
-      "voiceChannelId": "1555968937467056231",
-      "textChannelId": "1555968935935877191",
-      "position": 16618547,
-      "paused": false,
-      "volume": 100,
-      "repeatMode": "off",
-      "autoplay": false,
-      "is247": true,
-      "currentTrack": null,
-      "queue": []
-    }
-  ]
+  "savedAt": 1794203453133,
+  "count": 0,
+  "sessions": []
 }

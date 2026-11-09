@@ -14,7 +14,7 @@
     "multi_ownership": false,
     "updated_at": 1794036672279
   },
-  "test_guild_123": {
+  "test_guild_999": {
     "prefix": ".",
     "request_channel_id": null,
     "request_message_id": null,
@@ -27,24 +27,9 @@
     "text_247_channel_id": null,
     "bot_247_user_id": null,
     "multi_ownership": false,
-    "updated_at": 1794115693018
+    "updated_at": 1794036770057
   },
-  "999999999999999999": {
-    "prefix": ".",
-    "request_channel_id": null,
-    "request_message_id": null,
-    "dj_role_id": null,
-    "dj_enabled": false,
-    "auto_pause_enabled": true,
-    "stage_auto_speaker": true,
-    "mode_247": false,
-    "voice_247_channel_id": null,
-    "text_247_channel_id": null,
-    "bot_247_user_id": null,
-    "multi_ownership": false,
-    "updated_at": 1794116796715
-  },
-  "test_guild_999999": {
+  "1524739596670337197": {
     "prefix": ".",
     "request_channel_id": null,
     "request_message_id": null,
@@ -53,10 +38,25 @@
     "auto_pause_enabled": true,
     "stage_auto_speaker": true,
     "mode_247": true,
-    "voice_247_channel_id": "vc_channel_222",
-    "text_247_channel_id": "txt2",
-    "bot_247_user_id": "222222222222222222",
-    "multi_ownership": true,
-    "updated_at": 1794118407434
+    "voice_247_channel_id": "1524739599082066115",
+    "text_247_channel_id": "1524739599082066115",
+    "bot_247_user_id": "1568193148222443591",
+    "multi_ownership": false,
+    "updated_at": 1794130040739
+  },
+  "1555968929023664208": {
+    "prefix": ".",
+    "request_channel_id": null,
+    "request_message_id": null,
+    "dj_role_id": null,
+    "dj_enabled": false,
+    "auto_pause_enabled": true,
+    "stage_auto_speaker": true,
+    "mode_247": true,
+    "voice_247_channel_id": "1555968937467056231",
+    "text_247_channel_id": "1555968935935877191",
+    "bot_247_user_id": "1568538354742722691",
+    "multi_ownership": false,
+    "updated_at": 1794071539911
   }
 }
