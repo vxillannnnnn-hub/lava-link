@@ -227,7 +227,16 @@ jobs:
               --heartbeat-count 5 \
               --heartbeat-interval 5s \
               run --token "$CF_TOKEN" > tunnel.log 2>&1 &
-            echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+            TUNNEL_PID=$!
+            echo "TUNNEL_PID=$TUNNEL_PID" >> $GITHUB_ENV
+            echo "Tunnel PID: $TUNNEL_PID"
+            sleep 3
+            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+              echo "::error::Tunnel process failed to start!"
+              cat tunnel.log || true
+              exit 1
+            fi
+            echo "Tunnel started successfully with PID $TUNNEL_PID"
             HOST="${CF_CUSTOM_DOMAIN:-lavalink.opendrive.indevs.in}"
             echo "PUBLIC_HOST=$HOST" >> $GITHUB_ENV
             echo "PUBLIC_PORT=443" >> $GITHUB_ENV
@@ -242,7 +251,15 @@ jobs:
               --heartbeat-count 5 \
               --heartbeat-interval 5s \
               --url http://127.0.0.1:4998 > tunnel.log 2>&1 &
-            echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+            TUNNEL_PID=$!
+            echo "TUNNEL_PID=$TUNNEL_PID" >> $GITHUB_ENV
+            echo "Tunnel PID: $TUNNEL_PID"
+            sleep 3
+            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+              echo "::error::Tunnel process failed to start!"
+              cat tunnel.log || true
+              exit 1
+            fi
             TUNNEL_URL=""
             for i in {1..30}; do
               TUNNEL_URL=$(grep -o 'https://[-a-zA-Z0-9@:%._\+~#=]\+\.trycloudflare\.com' tunnel.log | head -n 1 || true)
