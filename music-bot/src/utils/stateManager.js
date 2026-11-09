@@ -87,6 +87,7 @@ class StateManager {
             volume: player.volume || 100,
             repeatMode: player.repeatMode || "off",
             autoplay: Boolean(player.get("autoplay")),
+            autoplayMode: player.get("autoplayMode") || "radio",
             is247,
             currentTrack,
             queue: queueTracks,
@@ -210,6 +211,7 @@ class StateManager {
           }
 
           player.set("autoplay", session.autoplay);
+          if (session.autoplayMode) player.set("autoplayMode", session.autoplayMode);
           player.set("247", Boolean(session.is247));
           if (session.repeatMode && player.setRepeatMode) {
             player.setRepeatMode(session.repeatMode);

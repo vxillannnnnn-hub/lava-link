@@ -722,6 +722,18 @@ module.exports = {
     }
   },
 
+  /**
+   * All active 24/7 records for a single guild (one row per bot).
+   */
+  getAll247BotsForGuild(guildId) {
+    try {
+      return stmts.getAll247Bots.all().filter((row) => row.guild_id === guildId);
+    } catch (err) {
+      logger.error(`[Database] Failed to get 24/7 bots for guild ${guildId}:`, err.message);
+      return [];
+    }
+  },
+
   // Playlists
   createPlaylist(userId, name) {
     try {

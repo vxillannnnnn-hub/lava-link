@@ -4,22 +4,10 @@ const emojis = require("../../utils/emojis");
 const audioQuality = require("../../utils/audioQuality");
 const { truncate, formatDuration } = require("../../utils/formatters");
 
-// Sources whose frames reach Lavalink already encoded as Opus.
-const OPUS_NATIVE_SOURCES = new Set(["youtube", "soundcloud", "http", "bandcamp"]);
-
-/**
- * True when any DSP filter is active. Filters force a PCM decode, so an active
- * filter always means the node re-encodes instead of forwarding Opus frames.
- */
-function hasActiveFilters(player) {
-  const data = player?.filterManager?.data || {};
-  if (data.timescale || data.tremolo || data.vibrato || data.rotation || data.distortion || data.karaoke || data.lowPass) {
-    return true;
-  }
-  if (Array.isArray(data.equalizer) && data.equalizer.some((band) => Number(band?.gain) !== 0)) return true;
-  if (data.volume && Number(data.volume) !== 1) return true;
-  return false;
-}
+// Codec-path knowledge lives in audioQuality so this command and the frame
+// monitor can never disagree about what counts as a transcode.
+const OPUS_NATIVE_SOURCES = audioQuality.OPUS_NATIVE_SOURCES;
+const hasActiveFilters = audioQuality.hasActiveFilters;
 
 /**
  * Describe whether the current track is forwarded bit-exact or re-encoded.

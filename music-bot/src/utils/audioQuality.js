@@ -36,6 +36,9 @@ const DEFAULT_METADATA_ONLY_SOURCES = [
   "flowery-tts",
 ];
 
+// Sources whose frames reach Lavalink already encoded as Opus.
+const OPUS_NATIVE_SOURCES = new Set(["youtube", "soundcloud", "http", "bandcamp"]);
+
 const METADATA_ONLY_SOURCES = new Set(
   (quality.metadataOnlySources || DEFAULT_METADATA_ONLY_SOURCES).map((s) => String(s).toLowerCase())
 );
@@ -68,6 +71,34 @@ function sourceOf(track) {
 
 function isMetadataOnlyTrack(track) {
   return METADATA_ONLY_SOURCES.has(sourceOf(track));
+}
+
+/**
+ * True when any DSP filter is active. Filters force a PCM decode, so an active
+ * filter always means the node re-encodes instead of forwarding Opus frames.
+ */
+function hasActiveFilters(player) {
+  const data = player?.filterManager?.data || {};
+  if (data.timescale || data.tremolo || data.vibrato || data.rotation || data.distortion || data.karaoke || data.lowPass) {
+    return true;
+  }
+  if (Array.isArray(data.equalizer) && data.equalizer.some((band) => Number(band?.gain) !== 0)) return true;
+  if (data.volume && Number(data.volume) !== 1) return true;
+  return false;
+}
+
+/**
+ * True when this player's audio reaches Discord bit-exact: Opus source, unity
+ * volume and no filter. Anything else makes the node decode and re-encode,
+ * which is what costs CPU and produces frame drops under load.
+ */
+function isPassthroughTrack(player, track) {
+  if (!track?.info) return false;
+  if (track.info.isStream) return false;
+  if (hasActiveFilters(player)) return false;
+  if (Number(player?.volume ?? 100) !== 100) return false;
+  if (isMetadataOnlyTrack(track)) return false;
+  return OPUS_NATIVE_SOURCES.has(sourceOf(track));
 }
 
 /**
@@ -240,7 +271,55 @@ async function ensureFullQualityTrack(player, track, requester) {
   return match;
 }
 
+/**
+ * Upgrade a list of tracks (playlists/albums) the same way single tracks are
+ * upgraded. Only previews are replaced by default, with bounded concurrency so
+ * a large playlist cannot flood the node with searches or delay the first
+ * track indefinitely.
+ *
+ * @param {import("lavalink-client").Player} player
+ * @param {object[]} tracks
+ * @param {unknown} requester
+ * @param {{ max?: number, concurrency?: number }} [options]
+ * @returns {Promise<object[]>}
+ */
+async function ensureFullQualityTracks(player, tracks, requester, options = {}) {
+  if (!Array.isArray(tracks) || tracks.length === 0) return tracks || [];
+  if (quality.preferOpusNativeSources === false) return tracks;
+
+  const max = Number.isFinite(options.max) ? options.max : 20;
+  const concurrency = Math.max(1, Number(options.concurrency) || 4);
+  const result = tracks.slice();
+  const targets = [];
+
+  for (let i = 0; i < result.length && targets.length < max; i++) {
+    const track = result[i];
+    if (!track?.info || !isMetadataOnlyTrack(track)) continue;
+    if (!isPreviewTrack(track) && quality.upgradeMetadataOnlySources !== true) continue;
+    targets.push(i);
+  }
+
+  if (targets.length === 0) return result;
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const index = targets[cursor++];
+      result[index] = await ensureFullQualityTrack(player, result[index], requester);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, targets.length) }, () => worker())
+  );
+
+  return result;
+}
+
 module.exports = {
+  OPUS_NATIVE_SOURCES,
+  hasActiveFilters,
+  isPassthroughTrack,
   METADATA_ONLY_SOURCES,
   METADATA_ONLY_SEARCH_PREFIXES,
   MIN_REAL_TRACK_DURATION_MS,
@@ -251,4 +330,5 @@ module.exports = {
   pickNativeCandidate,
   resolveOpusMatch,
   ensureFullQualityTrack,
+  ensureFullQualityTracks,
 };

@@ -57,12 +57,14 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
-    const subcommand = interaction.options.getSubcommand();
+    // Prefix form `.playlist` with no subcommand lists playlists.
+    const subcommand = interaction.options.getSubcommand() || "list";
     const userId = interaction.user.id;
 
     // 1. CREATE PLAYLIST
     if (subcommand === "create") {
-      const name = interaction.options.getString("name").trim();
+      const name = (interaction.options.getString("name") || "").trim();
+      if (!name) return interaction.reply(errorText("Provide a playlist name."));
       const created = db.createPlaylist(userId, name);
 
       if (!created) {
@@ -91,7 +93,8 @@ module.exports = {
 
     // 2. SAVE QUEUE TO PLAYLIST
     if (subcommand === "save-queue") {
-      const name = interaction.options.getString("name").trim();
+      const name = (interaction.options.getString("name") || "").trim();
+      if (!name) return interaction.reply(errorText("Provide a playlist name."));
       const player = client.lavalink.getPlayer(interaction.guildId);
 
       if (!player || (!player.queue.current && player.queue.tracks.length === 0)) {
@@ -138,7 +141,8 @@ module.exports = {
 
     // 3. PLAY PLAYLIST
     if (subcommand === "play") {
-      const name = interaction.options.getString("name").trim();
+      const name = (interaction.options.getString("name") || "").trim();
+      if (!name) return interaction.reply(errorText("Provide a playlist name."));
       const member = interaction.member;
       const voiceChannel = member.voice?.channel;
 
@@ -348,7 +352,8 @@ module.exports = {
 
     // 6. VIEW PLAYLIST
     if (subcommand === "view") {
-      const name = interaction.options.getString("name").trim();
+      const name = (interaction.options.getString("name") || "").trim();
+      if (!name) return interaction.reply(errorText("Provide a playlist name."));
       const pl = db.getPlaylist(userId, name);
 
       if (!pl) {
@@ -393,7 +398,8 @@ module.exports = {
 
     // 7. DELETE PLAYLIST
     if (subcommand === "delete") {
-      const name = interaction.options.getString("name").trim();
+      const name = (interaction.options.getString("name") || "").trim();
+      if (!name) return interaction.reply(errorText("Provide a playlist name."));
       const pl = db.getPlaylist(userId, name);
 
       if (!pl) {

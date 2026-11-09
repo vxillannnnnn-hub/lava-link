@@ -54,6 +54,8 @@ const ALIAS_MAP = new Map([
   ["filter", "filter"],
   ["eq", "filter"],
   ["filters", "filter"],
+  ["similar", "similar"],
+  ["sim", "similar"],
   // Management & Info
   ["prefix", "prefix"],
   ["setprefix", "prefix"],

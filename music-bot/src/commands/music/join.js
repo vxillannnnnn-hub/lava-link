@@ -41,11 +41,14 @@ module.exports = {
 
     let player = client.lavalink.getPlayer(interaction.guildId);
 
-    if (player && player.connected) {
-      if (player.voiceChannelId === voiceChannel.id) {
+    // A player can exist with a dead voice connection; creating a second player
+    // for the same guild is invalid, so reconnect the existing one instead.
+    if (player) {
+      if (player.connected && player.voiceChannelId === voiceChannel.id) {
         return interaction.reply(warnText("I am already connected to your voice channel!"));
       }
       player.voiceChannelId = voiceChannel.id;
+      player.textChannelId = interaction.channelId;
       await player.connect();
       audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
 

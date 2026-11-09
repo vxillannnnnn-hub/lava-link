@@ -41,6 +41,11 @@ module.exports = {
 
   async execute(interaction, client) {
     const query = interaction.options.getString("query");
+    if (!query || !query.trim()) {
+      return interaction.reply(
+        errorText("Provide a song name or a link.", "Example: `/play query:never gonna give you up` or `.play <song>`")
+      );
+    }
     const forcedSource = interaction.options.getString("source");
     const member = interaction.member;
     const voiceChannel = member.voice?.channel;
@@ -176,7 +181,13 @@ module.exports = {
       }
 
       case "playlist": {
-        const tracks = searchRes.tracks;
+        // Metadata-only playlists (Spotify without node credentials) can be all
+        // 30-second previews; upgrade those before they reach the queue.
+        const tracks = await audioQuality.ensureFullQualityTracks(
+          player,
+          searchRes.tracks,
+          interaction.user
+        );
         player.queue.add(tracks);
         const willPlayNow = !player.playing && !player.paused;
 

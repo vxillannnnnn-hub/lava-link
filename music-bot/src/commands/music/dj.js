@@ -31,7 +31,8 @@ module.exports = {
       return interaction.reply(errorText("You need **Manage Server** permissions to configure DJ settings."));
     }
 
-    const subcommand = interaction.options.getSubcommand();
+    // Prefix form `.dj` with no subcommand should show status, not go silent.
+    const subcommand = interaction.options.getSubcommand() || "status";
     const settings = db.getGuildSettings(interaction.guildId);
 
     if (subcommand === "set") {

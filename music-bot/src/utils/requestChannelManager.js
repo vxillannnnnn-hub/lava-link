@@ -17,6 +17,7 @@ const config = require("../config");
 const { getDashboardPayload, buildNowPlayingComponents } = require("./playerController");
 const { ComponentsV2Container } = require("./componentsV2");
 const { truncate } = require("./formatters");
+const audioQuality = require("./audioQuality");
 const emojis = require("./emojis");
 const logger = require("./logger");
 
@@ -176,13 +177,14 @@ async function handleSongRequestMessage(message, client) {
       }
 
       if (res.loadType === "playlist") {
-        player.queue.add(res.tracks);
+        const playlistTracks = await audioQuality.ensureFullQualityTracks(player, res.tracks, member.user);
+        player.queue.add(playlistTracks);
         const reply = await message.channel.send({
-          content: `${emojis.check} Queued playlist **${truncate(res.playlist?.title || "Playlist", 40)}** (${res.tracks.length} tracks).`,
+          content: `${emojis.check} Queued playlist **${truncate(res.playlist?.title || "Playlist", 40)}** (${playlistTracks.length} tracks).`,
         }).catch(() => null);
         if (reply) setTimeout(() => reply.delete().catch(() => {}), 4000);
       } else {
-        const track = res.tracks[0];
+        const track = await audioQuality.ensureFullQualityTrack(player, res.tracks[0], member.user);
         player.queue.add(track);
         const reply = await message.channel.send({
           content: `${emojis.check} Added **${truncate(track.info.title, 45)}** to the queue.`,
@@ -192,7 +194,7 @@ async function handleSongRequestMessage(message, client) {
 
       if (!player.playing && !player.paused) {
         const voiceStatusManager = require("./voiceStatusManager");
-        const nextTrack = res.tracks[0];
+        const nextTrack = player.queue.tracks[0];
         if (nextTrack) voiceStatusManager.onTrackStart(client, player, nextTrack);
         await player.play();
       } else {

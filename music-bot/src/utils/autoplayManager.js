@@ -1,21 +1,31 @@
 /**
- * Autoplay recommendation engine (Jockie / Eara behaviour)
+ * Recommendation engine (Jockie / Eara / Diva behaviour)
  * ---------------------------------------------------------------------------
- * How the good bots actually keep music flowing:
- *   1. The seed is the track that just ended, never the queue head.
- *   2. The first strategy is the platform's own radio/related endpoint
- *      (YouTube Mix `list=RD<videoId>`), which is what Jockie and Eara use -
- *      it returns tracks in the same vibe instead of "songs with a similar title".
- *   3. The next recommendation is resolved *while the current track is still
- *      playing* and cached, so the hand-off has no silent gap.
- *   4. Everything is deduplicated against the queue and a rolling history, so
- *      the same song never loops back.
- *   5. Previews, livestreams and podcasts never enter autoplay.
+ * What the big bots actually do when the queue runs out:
+ *   - Jockie: `/autoplay toggle` queues *related* tracks, nothing more.
+ *   - Eara: `/autoplay` keeps playing similar songs, and leans on Last.fm for
+ *     the "similar" signal.
+ *   - Diva: exposes `/addsimilarsongs [amount]` so the same engine can be used
+ *     on demand, not only at queue end.
+ *   - YouTube Music's radio builder ranks by familiarity vs discovery, so a
+ *     station can be "same artist", "blend" or "new artists".
  *
- * Playback itself is owned by lavalink-client: the manager's
- * `onEmptyQueue.autoPlayFunction` is the single entry point and adds a track to
- * the queue; the client then starts it. This module never fights the client for
- * ownership and never throws into it.
+ * This engine follows that shape instead of grabbing the first search result:
+ *
+ *   1. Resolve a *pool* of candidates (platform radio first, related searches
+ *      as fallback) - not a single track. The pool is refilled in the background
+ *      so the hand-off never waits on the network.
+ *   2. Score every candidate: same artist / album affinity, position in the
+ *      radio mix, artist-run avoidance (no three tracks by one artist in a row)
+ *      and recently skipped artists (negative feedback).
+ *   3. Pick weighted-random from the pool, so repeated sessions do not replay
+ *      the same deterministic order.
+ *   4. Modes: `radio` (default endless mix), `artist` (seed artist catalogue),
+ *      `discover` (explicitly avoid the seed artist).
+ *
+ * Playback ownership stays with lavalink-client: the manager's
+ * `onEmptyQueue.autoPlayFunction` is the only entry point that queues a track at
+ * queue end, and this module never throws into it.
  */
 
 const { cleanTrackTitle } = require("./sourceManager");
@@ -26,33 +36,106 @@ const PREVIEW_MAX_MS = config.player?.quality?.previewMaxDurationMs ?? 31000;
 const MIN_TRACK_MS = Math.max(45000, PREVIEW_MAX_MS);
 const MAX_TRACK_MS = 900000; // 15 minutes: skip podcasts / long mixes
 const RESOLVE_TIMEOUT_MS = config.player?.autoplayTimeoutMs ?? 7000;
+const DISLIKE_TTL_MS = 30 * 60 * 1000;
+const MAX_DISLIKED = 20;
+
+/**
+ * Mode weights. `radio` is YouTube-Music "blend", `artist` is a familiar
+ * station, `discover` is the discovery end of the slider.
+ */
+const MODES = {
+  radio: {
+    label: "Radio",
+    sameArtistWeight: 2.5,
+    sameAlbumWeight: 1.0,
+    requireSeedArtist: false,
+    avoidSeedArtist: false,
+  },
+  artist: {
+    label: "Artist",
+    sameArtistWeight: 6.0,
+    sameAlbumWeight: 1.5,
+    requireSeedArtist: true,
+    avoidSeedArtist: false,
+  },
+  discover: {
+    label: "Discover",
+    sameArtistWeight: -4.0,
+    sameAlbumWeight: -1.0,
+    requireSeedArtist: false,
+    avoidSeedArtist: true,
+  },
+};
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Artist identity across platforms: "Artist - Topic", "ArtistVEVO" and
+ * "Artist" must collapse to the same key or artist affinity never fires.
+ */
+function normalizeArtist(value) {
+  return normalizeText(
+    String(value || "")
+      .replace(/\s*-\s*topic$/i, "")
+      .replace(/\s*vevo$/i, "")
+  );
+}
 
 class AutoplayManager {
   constructor(maxHistoryPerGuild = 100) {
     this.maxHistoryPerGuild = maxHistoryPerGuild;
-    // Map<guildId, { ids: Set<string>, titles: Set<string> }>
+    // Map<guildId, { ids: Set<string>, titles: Set<string>, artists: Array<{ key, at }> }>
     this.guildHistories = new Map();
+    // Map<guildId, Map<artistKey, dislikedAt>>
+    this.dislikedArtists = new Map();
   }
 
-  /**
-   * Normalize title string for cross-platform comparison
-   */
+  // ---------------------------------------------------------------------------
+  // Modes
+  // ---------------------------------------------------------------------------
+
+  getMode(player) {
+    const value = String(player?.get?.("autoplayMode") || "radio").toLowerCase();
+    return MODES[value] ? value : "radio";
+  }
+
+  setMode(player, mode) {
+    const value = String(mode || "").toLowerCase();
+    if (!MODES[value] || !player?.set) return false;
+
+    player.set("autoplayMode", value);
+    // A pool ranked for the old mode is wrong for the new one.
+    player.set("autoplayPool", null);
+    return true;
+  }
+
+  describeMode(mode) {
+    return MODES[mode]?.label || MODES.radio.label;
+  }
+
+  // ---------------------------------------------------------------------------
+  // History and feedback
+  // ---------------------------------------------------------------------------
+
   normalizeTitle(title) {
     if (!title) return "";
-    return cleanTrackTitle(title)
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+    return normalizeText(cleanTrackTitle(title));
   }
 
   /**
-   * Record a track identifier and title to the guild's history buffer
+   * Record a played track so it is never recommended again, and remember which
+   * artists were played recently so runs can be avoided.
    */
-  recordTrackPlayed(guildId, identifier, title) {
+  recordTrackPlayed(guildId, identifier, title, author) {
     if (!guildId) return;
 
     let history = this.guildHistories.get(guildId);
     if (!history) {
-      history = { ids: new Set(), titles: new Set() };
+      history = { ids: new Set(), titles: new Set(), artists: [] };
       this.guildHistories.set(guildId, history);
     }
 
@@ -74,11 +157,14 @@ class AutoplayManager {
         }
       }
     }
+
+    const artist = normalizeArtist(author);
+    if (artist) {
+      history.artists.push({ key: artist, at: Date.now() });
+      if (history.artists.length > 20) history.artists.splice(0, history.artists.length - 20);
+    }
   }
 
-  /**
-   * Check if track was played recently in this guild by ID or title
-   */
   isAlreadyPlayed(guildId, identifier, title) {
     if (!guildId) return false;
     const history = this.guildHistories.get(guildId);
@@ -94,95 +180,170 @@ class AutoplayManager {
   }
 
   /**
-   * Clear guild autoplay history
+   * Most recent distinct artist keys, newest first.
    */
-  clearHistory(guildId) {
-    this.guildHistories.delete(guildId);
+  recentArtists(guildId, limit = 3) {
+    const history = this.guildHistories.get(guildId);
+    if (!history?.artists?.length) return [];
+
+    const seen = new Set();
+    const out = [];
+    for (let i = history.artists.length - 1; i >= 0 && out.length < limit; i--) {
+      const key = history.artists[i].key;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    }
+    return out;
   }
 
-  /**
-   * Get guild history count
-   */
+  dislikeArtist(guildId, artistKey) {
+    if (!guildId || !artistKey) return;
+
+    let map = this.dislikedArtists.get(guildId);
+    if (!map) {
+      map = new Map();
+      this.dislikedArtists.set(guildId, map);
+    }
+
+    map.set(artistKey, Date.now());
+    if (map.size > MAX_DISLIKED) {
+      const [oldestKey] = map.keys();
+      map.delete(oldestKey);
+    }
+  }
+
+  dislikedFor(guildId) {
+    const map = this.dislikedArtists.get(guildId);
+    if (!map) return [];
+
+    const now = Date.now();
+    const out = [];
+    for (const [key, at] of map.entries()) {
+      if (now - at > DISLIKE_TTL_MS) map.delete(key);
+      else out.push(key);
+    }
+    if (map.size === 0) this.dislikedArtists.delete(guildId);
+    return out;
+  }
+
+  clearHistory(guildId) {
+    this.guildHistories.delete(guildId);
+    this.dislikedArtists.delete(guildId);
+  }
+
   getHistorySize(guildId) {
     return this.guildHistories.get(guildId)?.ids?.size || 0;
   }
 
+  // ---------------------------------------------------------------------------
+  // Scoring
+  // ---------------------------------------------------------------------------
+
   /**
-   * Pick the highest-affinity candidate that is not the current track, not
-   * already queued, not in history, and not a preview / stream / podcast.
+   * Score one candidate for a seed track.
    *
-   * @param {object[]} candidates
-   * @param {string} guildId
-   * @param {object} lastTrack
-   * @param {import("lavalink-client").Player} player
-   * @returns {object|null}
+   * @param {object} track Lavalink track
+   * @param {{ seed: object, mode: string, recentArtists?: string[], disliked?: string[], position?: number, total?: number }} context
+   * @returns {number} affinity score (higher is better, negative is bad)
    */
-  pickBestCandidate(candidates, guildId, lastTrack, player) {
-    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  scoreCandidate(track, context = {}) {
+    const { seed, mode = "radio", recentArtists = [], disliked = [], position = 0, total = 1 } = context;
+    const weights = MODES[mode] || MODES.radio;
 
-    const currentId = lastTrack?.info?.identifier;
-    const currentNorm = this.normalizeTitle(lastTrack?.info?.title);
-    const queueIds = new Set(
-      (player?.queue?.tracks || []).map((t) => t?.info?.identifier).filter(Boolean)
-    );
-    const seen = new Set();
+    const artist = normalizeArtist(track?.info?.author);
+    const seedArtist = normalizeArtist(seed?.info?.author);
+    let score = 1;
 
-    const usable = (info) => {
-      if (!info?.identifier) return false;
-      if (seen.has(info.identifier)) return false;
-      seen.add(info.identifier);
-      if (info.identifier === currentId) return false;
+    if (artist && seedArtist && artist === seedArtist) score += weights.sameArtistWeight;
 
-      const duration = Number(info.duration) || 0;
-      if (info.isStream) return false;
-      if (duration < MIN_TRACK_MS || duration > MAX_TRACK_MS) return false;
+    const album = normalizeText(track?.info?.albumName);
+    const seedAlbum = normalizeText(seed?.info?.albumName);
+    if (album && seedAlbum && album === seedAlbum) score += weights.sameAlbumWeight;
 
-      if (queueIds.has(info.identifier)) return false;
-      if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) return false;
-      return true;
-    };
+    // Avoid an artist run (three in a row) - but in `artist` mode the run is the
+    // whole point, so the penalty is skipped there.
+    if (mode !== "artist" && artist && recentArtists.includes(artist)) score -= 2.5;
 
-    // Strict pass: same song family, so `related` results that are the identical
-    // song (different upload) are rejected.
-    for (const track of candidates) {
-      const info = track?.info;
-      if (!usable(info)) continue;
+    // Recently skipped artists sink to the bottom of the pool.
+    if (artist && disliked.includes(artist)) score -= 4;
 
-      const candNorm = this.normalizeTitle(info.title);
-      if (candNorm && currentNorm) {
-        if (candNorm === currentNorm || candNorm.startsWith(currentNorm) || currentNorm.startsWith(candNorm)) {
-          continue;
-        }
-      }
-      return track;
-    }
+    // Earlier entries in the platform radio are stronger matches.
+    score += (1 - position / Math.max(1, total)) * 0.5;
 
-    // Relaxed pass: title matching already ran out, keep only the hard guards
-    // (duration, duplicates, history) so autoplay still advances.
-    for (const track of candidates) {
-      const info = track?.info;
-      if (!info?.identifier) continue;
-      if (info.identifier === currentId || queueIds.has(info.identifier)) continue;
-      if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) continue;
-
-      const duration = Number(info.duration) || 0;
-      if (info.isStream || duration < MIN_TRACK_MS || duration > MAX_TRACK_MS) continue;
-      return track;
-    }
-
-    return null;
+    return score;
   }
 
   /**
-   * player.search with a hard timeout, so a slow/dead node can never stall the
-   * queue hand-off.
+   * Filter raw search results down to playable, non-duplicate candidates for a
+   * mode. Returns an array (the pool building block).
    */
+  filterCandidates(candidates, guildId, seed, player, mode) {
+    const out = [];
+    const seen = new Set();
+    const seedArtist = normalizeArtist(seed?.info?.author);
+    const seedTitle = this.normalizeTitle(seed?.info?.title);
+    const queueIds = new Set(
+      (player?.queue?.tracks || []).map((t) => t?.info?.identifier).filter(Boolean)
+    );
+    const weights = MODES[mode] || MODES.radio;
+
+    for (const track of candidates || []) {
+      const info = track?.info;
+      if (!info?.identifier || seen.has(info.identifier)) continue;
+      seen.add(info.identifier);
+
+      if (info.identifier === seed?.info?.identifier) continue;
+
+      const duration = Number(info.duration) || 0;
+      if (info.isStream) continue;
+      if (duration < MIN_TRACK_MS || duration > MAX_TRACK_MS) continue;
+
+      if (queueIds.has(info.identifier)) continue;
+      if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) continue;
+
+      const artist = normalizeArtist(info.author);
+      if (weights.requireSeedArtist && seedArtist && artist !== seedArtist) continue;
+      if (weights.avoidSeedArtist && seedArtist && artist === seedArtist) continue;
+
+      const candidateTitle = this.normalizeTitle(info.title);
+      if (
+        candidateTitle &&
+        seedTitle &&
+        (candidateTitle === seedTitle ||
+          candidateTitle.startsWith(seedTitle) ||
+          seedTitle.startsWith(candidateTitle))
+      ) {
+        continue;
+      }
+
+      out.push(track);
+    }
+
+    return out;
+  }
+
+  /**
+   * Backwards-compatible single pick (used by older call sites/tests).
+   */
+  pickBestCandidate(candidates, guildId, lastTrack, player, mode = "radio") {
+    const filtered = this.filterCandidates(candidates, guildId, lastTrack, player, mode);
+    return filtered[0] || null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Resolution
+  // ---------------------------------------------------------------------------
+
   async searchWithTimeout(player, query) {
     let timer;
     try {
       const searchPromise = player.search({ query }, player.queue?.current?.requester || null);
       const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Autoplay lookup timed out after ${RESOLVE_TIMEOUT_MS}ms`)), RESOLVE_TIMEOUT_MS);
+        timer = setTimeout(
+          () => reject(new Error(`Autoplay lookup timed out after ${RESOLVE_TIMEOUT_MS}ms`)),
+          RESOLVE_TIMEOUT_MS
+        );
         if (timer.unref) timer.unref();
       });
       const res = await Promise.race([searchPromise, timeoutPromise]);
@@ -196,91 +357,183 @@ class AutoplayManager {
   }
 
   /**
-   * Resolve the next recommendation for a seed track.
+   * Build a ranked pool of recommendations for a seed track.
    *
-   * Stage 1: platform radio (YouTube Mix on the seed id) - Jockie/Eara behaviour.
-   * Stage 2: related music search, run in parallel variants and merged.
-   *
-   * @returns {Promise<object|null>} stamped track ready to enqueue
+   * @param {import("lavalink-client").Player} player
+   * @param {object} seed
+   * @param {{ mode?: string, size?: number, kind?: "autoplay"|"similar" }} [options]
+   * @returns {Promise<object[]>} stamped, ranked tracks
    */
-  async resolveRecommendation(player, lastTrack) {
-    if (!player || typeof player.search !== "function" || !lastTrack?.info) return null;
+  async buildPool(player, seed, options = {}) {
+    if (!player || typeof player.search !== "function" || !seed?.info) return [];
 
-    const guildId = player.guildId;
-    const title = cleanTrackTitle(lastTrack.info.title || "");
-    const author = lastTrack.info.author || "";
-    const source = String(lastTrack.info.sourceName || "").toLowerCase();
+    const mode = options.mode || this.getMode(player);
+    const size = Math.max(1, Number(options.size) || Number(config.player.autoplayPoolSize) || 12);
+    const kind = options.kind === "similar" ? "similar" : "autoplay";
+    const title = cleanTrackTitle(seed.info.title || "");
+    const author = seed.info.author || "";
+    const source = String(seed.info.sourceName || "").toLowerCase();
+    const raw = [];
 
-    // ---- Stage 1: seed radio -------------------------------------------------
-    try {
-      let seedId = null;
-      if (source === "youtube" && lastTrack.info.identifier) {
-        seedId = lastTrack.info.identifier;
-      } else if (title) {
-        const lookup = await this.searchWithTimeout(player, `ytmsearch:${title} ${author}`.trim());
-        seedId = lookup.find((t) => t?.info?.identifier)?.info?.identifier || null;
-      }
-
-      if (seedId) {
-        const radio = await this.searchWithTimeout(
-          player,
-          `https://www.youtube.com/watch?v=${seedId}&list=RD${seedId}`
-        );
-        const picked = this.pickBestCandidate(radio, guildId, lastTrack, player);
-        if (picked) {
-          logger.debug(`[Autoplay] Resolved via seed radio: "${picked.info.title}"`);
-          return this.stampTrack(picked, lastTrack, player);
+    // Stage 1: the platform's own radio. This is what Jockie/Eara are really
+    // playing - a mix seeded from the track, not "songs with a similar title".
+    if (mode === "radio" || mode === "artist") {
+      try {
+        let seedId = source === "youtube" && seed.info.identifier ? seed.info.identifier : null;
+        if (!seedId && mode === "radio" && title) {
+          const lookup = await this.searchWithTimeout(player, `ytmsearch:${title} ${author}`.trim());
+          const sameArtist = lookup.find(
+            (t) => t?.info?.identifier && normalizeArtist(t.info.author) === normalizeArtist(author)
+          );
+          seedId = sameArtist?.info?.identifier || lookup.find((t) => t?.info?.identifier)?.info?.identifier || null;
         }
+
+        if (seedId && mode === "radio") {
+          raw.push(
+            ...(await this.searchWithTimeout(
+              player,
+              `https://www.youtube.com/watch?v=${seedId}&list=RD${seedId}`
+            ))
+          );
+        }
+      } catch (err) {
+        logger.debug(`[Autoplay] Radio stage failed: ${err?.message || err}`);
       }
-    } catch (err) {
-      logger.debug(`[Autoplay] Seed radio stage failed: ${err?.message || err}`);
     }
 
-    // ---- Stage 2: related searches (parallel, merged) ------------------------
-    if (!title) return null;
+    // Stage 2: related searches (and the whole strategy for `artist`/`discover`).
+    if (raw.length < size && title) {
+      const queries =
+        mode === "artist"
+          ? [`ytmsearch:${author} mix`.trim(), `ytsearch:${author} songs`.trim()]
+          : [`ytmsearch:${title} ${author} mix`.trim(), `ytsearch:${title} ${author} song`.trim()];
 
-    const [musicRes, plainRes] = await Promise.allSettled([
-      this.searchWithTimeout(player, `ytmsearch:${title} ${author} mix`.trim()),
-      this.searchWithTimeout(player, `ytsearch:${title} ${author} song`.trim()),
-    ]);
-
-    const merged = [
-      ...(musicRes.status === "fulfilled" ? musicRes.value : []),
-      ...(plainRes.status === "fulfilled" ? plainRes.value : []),
-    ];
-
-    const picked = this.pickBestCandidate(merged, guildId, lastTrack, player);
-    if (picked) {
-      logger.debug(`[Autoplay] Resolved via related search: "${picked.info.title}"`);
-      return this.stampTrack(picked, lastTrack, player);
+      const results = await Promise.allSettled(queries.map((q) => this.searchWithTimeout(player, q)));
+      for (const result of results) {
+        if (result.status === "fulfilled") raw.push(...result.value);
+      }
     }
 
-    return null;
+    const filtered = this.filterCandidates(raw, player.guildId, seed, player, mode);
+    const artistCooldown = Number(config.player.autoplayArtistCooldown) || 2;
+    const recentArtists = this.recentArtists(player.guildId, artistCooldown).filter(
+      (artist) => artist !== normalizeArtist(author)
+    );
+    const disliked = this.dislikedFor(player.guildId);
+
+    const scored = filtered.map((track, index) => ({
+      track,
+      score: this.scoreCandidate(track, {
+        seed,
+        mode,
+        recentArtists,
+        disliked,
+        position: index,
+        total: filtered.length,
+      }),
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+
+    return scored.slice(0, size).map((entry) => this.stampTrack(entry.track, seed, player, kind));
   }
 
   /**
-   * Mark a resolved track as an autoplay pick with full attribution.
+   * Backwards-compatible single recommendation.
    */
-  stampTrack(track, lastTrack, player) {
+  async resolveRecommendation(player, lastTrack) {
+    const pool = await this.buildPool(player, lastTrack);
+    return pool[0] || null;
+  }
+
+  /**
+   * Weighted-random pick from a pool, re-checking the queue and history at
+   * consume time so a track queued by a user in the meantime is not duplicated.
+   */
+  pickFromPool(pool, player, seed, mode = "radio") {
+    const seedArtist = normalizeArtist(seed?.info?.author);
+    const queueIds = new Set(
+      (player?.queue?.tracks || []).map((t) => t?.info?.identifier).filter(Boolean)
+    );
+    const artistCooldown = Number(config.player.autoplayArtistCooldown) || 2;
+    const recentArtists = this.recentArtists(player.guildId, artistCooldown).filter((a) => a !== seedArtist);
+    const disliked = this.dislikedFor(player.guildId);
+    const weights = MODES[mode] || MODES.radio;
+
+    const usable = (pool || []).filter((track) => {
+      const info = track?.info;
+      if (!info?.identifier) return false;
+      if (info.identifier === seed?.info?.identifier) return false;
+      if (queueIds.has(info.identifier)) return false;
+      if (this.isAlreadyPlayed(player.guildId, info.identifier, info.title)) return false;
+
+      const artist = normalizeArtist(info.author);
+      if (weights.requireSeedArtist && seedArtist && artist !== seedArtist) return false;
+      if (weights.avoidSeedArtist && seedArtist && artist === seedArtist) return false;
+      return true;
+    });
+
+    if (!usable.length) return null;
+
+    const scores = usable.map((track, index) =>
+      Math.max(
+        0.05,
+        this.scoreCandidate(track, {
+          seed,
+          mode,
+          recentArtists,
+          disliked,
+          position: index,
+          total: usable.length,
+        })
+      )
+    );
+    const total = scores.reduce((sum, score) => sum + score, 0);
+
+    let roll = Math.random() * total;
+    for (let i = 0; i < usable.length; i++) {
+      roll -= scores[i];
+      if (roll <= 0) return usable[i];
+    }
+    return usable[usable.length - 1];
+  }
+
+  /**
+   * Mark a resolved track with full attribution.
+   *
+   * @param {object} track
+   * @param {object} seed
+   * @param {import("lavalink-client").Player} player
+   * @param {"autoplay"|"similar"} kind
+   */
+  stampTrack(track, seed, player, kind = "autoplay") {
     const clientUserId =
       player?.lavalink?.client?.user?.id || player?.client?.user?.id || "autoplay";
 
     track.requester = {
       id: clientUserId,
-      username: "Autoplay",
+      username: kind === "similar" ? "Similar" : "Autoplay",
       bot: true,
       displayAvatarURL: () => player?.lavalink?.client?.user?.displayAvatarURL?.() || undefined,
     };
-    track.isAutoplay = true;
-    track.seedTitle = lastTrack?.info?.title || "Music";
+    track.isAutoplay = kind === "autoplay";
+    track.isSimilar = kind === "similar";
+    track.seedTitle = seed?.info?.title || "Music";
     return track;
   }
 
+  // ---------------------------------------------------------------------------
+  // Prefetch / consume
+  // ---------------------------------------------------------------------------
+
+  getPoolSize(player) {
+    const state = player?.get?.("autoplayPool");
+    return state?.tracks?.length || 0;
+  }
+
   /**
-   * Resolve the next recommendation while the current track is still playing, so
-   * the hand-off at the end of the track is gapless.
-   *
-   * @returns {Promise<object|null>} cached recommendation
+   * Resolve the next pool while the current track is still playing, so the
+   * hand-off at the end of the track is gapless.
    */
   async prefetchAutoplay(player, currentTrack) {
     if (!player || !currentTrack) return null;
@@ -289,14 +542,20 @@ class AutoplayManager {
 
     player.set("isAutoplayPrefetching", true);
     try {
-      const recommendation = await this.resolveRecommendation(player, currentTrack);
-      if (recommendation) {
-        player.set("prefetchedAutoplayTrack", recommendation);
+      const mode = this.getMode(player);
+      const pool = await this.buildPool(player, currentTrack, { mode });
+      if (pool.length) {
+        player.set("autoplayPool", {
+          seedIdentifier: currentTrack.info?.identifier || null,
+          mode,
+          createdAt: Date.now(),
+          tracks: pool,
+        });
         logger.debug(
-          `[Autoplay] Pre-buffered: "${recommendation.info.title}" (seed: "${currentTrack.info.title}")`
+          `[Autoplay] Pool ready: ${pool.length} candidate(s) for "${currentTrack.info.title}" (${mode})`
         );
       }
-      return recommendation;
+      return pool;
     } catch (err) {
       logger.debug(`[Autoplay] Prefetch failed in guild ${player.guildId}: ${err?.message || err}`);
       return null;
@@ -306,16 +565,24 @@ class AutoplayManager {
   }
 
   /**
-   * Single entry point used by the manager's onEmptyQueue hook, the /autoplay
+   * On-demand recommendations for `/similar`.
+   */
+  async buildRecommendations(player, seed, options = {}) {
+    const amount = Math.max(1, Math.min(10, Number(options.amount) || 5));
+    const pool = await this.buildPool(player, seed, {
+      mode: options.mode || this.getMode(player),
+      kind: "similar",
+      size: amount,
+    });
+    return pool.slice(0, amount);
+  }
+
+  /**
+   * Single entry point used by the manager's onEmptyQueue hook, the `/autoplay`
    * command and the control panel button.
    *
-   * Adds exactly one track to the queue. In hook mode the client starts it; in
-   * manual mode this method starts playback itself when the player is idle.
-   *
-   * @param {import("lavalink-client").Player} player
-   * @param {object|null} lastTrack seed track
-   * @param {boolean} isAutoPlayHook true when invoked from lavalink-client
-   * @returns {Promise<boolean>} whether a track was queued
+   * Adds exactly one track from the ranked pool. In hook mode the client starts
+   * it; in manual mode this method starts playback itself when the player is idle.
    */
   async executeAutoplay(player, lastTrack, isAutoPlayHook = false) {
     if (!player) return false;
@@ -330,14 +597,22 @@ class AutoplayManager {
         return false;
       }
 
-      let nextTrack = player.get("prefetchedAutoplayTrack") || null;
-      player.set("prefetchedAutoplayTrack", null);
+      const mode = this.getMode(player);
+      const poolState = player.get("autoplayPool");
+      const poolFresh =
+        poolState &&
+        Array.isArray(poolState.tracks) &&
+        poolState.tracks.length > 0 &&
+        poolState.seedIdentifier === (seed.info.identifier || null) &&
+        poolState.mode === mode &&
+        Date.now() - (poolState.createdAt || 0) < (Number(config.player.autoplayPoolTtlMs) || 900000);
 
-      // Drop a stale prefetch that was resolved for a different seed
-      if (nextTrack && nextTrack.info?.identifier === seed.info?.identifier) nextTrack = null;
+      let pool = poolFresh ? poolState.tracks : [];
+      let nextTrack = this.pickFromPool(pool, player, seed, mode);
 
       if (!nextTrack) {
-        nextTrack = await this.resolveRecommendation(player, seed);
+        pool = await this.buildPool(player, seed, { mode });
+        nextTrack = this.pickFromPool(pool, player, seed, mode);
       }
 
       if (!nextTrack) {
@@ -345,18 +620,26 @@ class AutoplayManager {
         return false;
       }
 
-      this.recordTrackPlayed(player.guildId, nextTrack.info?.identifier, nextTrack.info?.title);
-      player.queue.add(nextTrack);
+      const remaining = pool.filter((track) => track.info?.identifier !== nextTrack.info.identifier);
+      player.set("autoplayPool", {
+        seedIdentifier: seed.info.identifier || null,
+        mode,
+        createdAt: Date.now(),
+        tracks: remaining,
+      });
       player.set("autoplayHandledAt", Date.now());
+
+      this.recordTrackPlayed(player.guildId, nextTrack.info?.identifier, nextTrack.info?.title, nextTrack.info?.author);
+      player.queue.add(nextTrack);
       logger.info(
-        `[Autoplay] Queued "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId} (seed: "${seed.info.title}")`
+        `[Autoplay/${mode}] Queued "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId} (seed: "${seed.info.title}", ${remaining.length} left in pool)`
       );
 
       const voiceStatusManager = require("./voiceStatusManager");
       voiceStatusManager.onTrackStart(player.lavalink?.client, player, nextTrack);
 
-      // Pre-resolve the *following* track now so the next hand-off is instant.
-      this.prefetchAutoplay(player, nextTrack).catch(() => {});
+      // Keep the pool topped up for the track that is about to start.
+      if (remaining.length < 3) this.prefetchAutoplay(player, nextTrack).catch(() => {});
 
       if (!isAutoPlayHook && !player.playing && !player.queue.current) {
         await player.play();
@@ -370,6 +653,40 @@ class AutoplayManager {
       player._autoplayRunning = false;
     }
   }
+
+  /**
+   * Negative feedback: an autoplay track skipped inside its first
+   * `autoplaySkipPercent` percent (or 45s, whichever is shorter) is treated as
+   * a miss. That artist is dropped from recommendations for 30 minutes and the
+   * rest of the pool is discarded so the station pivots instead of replaying
+   * the same corner of it.
+   *
+   * @returns {{ skipped: boolean, elapsedMs: number }|null}
+   */
+  recordOutcome(player, track, client) {
+    const startedAt = Number(player?.get?.("autoplayTrackStartedAt")) || 0;
+    if (!track?.isAutoplay || !startedAt) return null;
+
+    player.set("autoplayTrackStartedAt", null);
+    const elapsedMs = Date.now() - startedAt;
+    const duration = Number(track.info?.duration) || 0;
+    const percent = Number(config.player.autoplaySkipPercent) || 25;
+    const threshold = Math.min(45000, duration * (percent / 100));
+
+    if (elapsedMs >= threshold) return { skipped: false, elapsedMs };
+
+    const artist = normalizeArtist(track.info?.author);
+    if (artist) this.dislikeArtist(player.guildId, artist);
+    player.set("autoplayPool", null);
+
+    logger.info(
+      `[Autoplay] Early skip after ${Math.round(elapsedMs / 1000)}s - dropping ` +
+        `"${track.info?.author || "unknown artist"}" from recommendations for 30 minutes.`
+    );
+    return { skipped: true, elapsedMs };
+  }
 }
 
 module.exports = new AutoplayManager();
+module.exports.MODES = MODES;
+module.exports.normalizeArtist = normalizeArtist;

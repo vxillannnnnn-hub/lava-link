@@ -45,7 +45,8 @@ function getCategoryEmbed(category, client) {
           { name: "`/move <from> <to>`", value: "Move a track to another position in queue." },
           { name: "`/swap <pos1> <pos2>`", value: "Swap positions of two tracks in queue." },
           { name: "`/voteskip`", value: "Vote to skip the current song (for fair queue in DJ-protected servers)." },
-          { name: "`/autoplay [toggle/status/clear]`", value: "Jockie-style AI Autoplay: streams algorithmic YouTube/Spotify Radio mixes when queue ends." }
+          { name: "`/autoplay [toggle/status/clear/mode]`", value: "Jockie-style Autoplay: ranked recommendations with radio / artist / discover modes and skip feedback." },
+          { name: "`/similar [amount]`", value: "Queue tracks similar to what is playing right now (Diva-style addsimilarsongs)." }
         );
       break;
 

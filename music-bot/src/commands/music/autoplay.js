@@ -22,6 +22,22 @@ module.exports = {
     )
     .addSubcommand((subcommand) =>
       subcommand.setName("clear").setDescription("Clear guild autoplay history buffer")
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("mode")
+        .setDescription("Choose how recommendations are picked")
+        .addStringOption((option) =>
+          option
+            .setName("mode")
+            .setDescription("radio = endless mix, artist = same artist, discover = new artists")
+            .setRequired(true)
+            .addChoices(
+              { name: "Radio (endless mix, default)", value: "radio" },
+              { name: "Artist (same artist catalogue)", value: "artist" },
+              { name: "Discover (avoid the seed artist)", value: "discover" }
+            )
+        )
     ),
 
   async execute(interaction, client) {
@@ -59,9 +75,30 @@ module.exports = {
       );
     }
 
+    if (subcommand === "mode") {
+      const mode = interaction.options.getString("mode");
+      if (!autoplayManager.setMode(player, mode)) {
+        return interaction.reply(errorText("Unknown autoplay mode. Use `radio`, `artist` or `discover`."));
+      }
+
+      return interaction.reply(
+        actionText(
+          emojis.autoplay,
+          `Autoplay mode set to **${autoplayManager.describeMode(mode)}**`,
+          mode === "artist"
+            ? "Recommendations will stay inside the seed artist's catalogue"
+            : mode === "discover"
+              ? "Recommendations will avoid the seed artist to surface new artists"
+              : "Recommendations will follow the platform radio mix"
+        )
+      );
+    }
+
     if (subcommand === "status") {
       const isEnabled = Boolean(player.get("autoplay"));
       const historyCount = autoplayManager.getHistorySize(player.guildId);
+      const mode = autoplayManager.getMode(player);
+      const poolSize = autoplayManager.getPoolSize(player);
       const rawSeed = player.queue.current?.info?.title || player.get("lastPlayedTrack")?.info?.title || "None (Waiting for playback)";
       const seedTitle = truncate(cleanTrackTitle(rawSeed), 40);
 
@@ -69,7 +106,7 @@ module.exports = {
         actionText(
           emojis.autoplay,
           `Autoplay status: **${isEnabled ? "ACTIVE" : "INACTIVE"}**`,
-          `Seed: **${seedTitle}** • History: \`${historyCount}/100\` tracks cached`,
+          `Mode: **${autoplayManager.describeMode(mode)}** • Seed: **${seedTitle}** • Pool: \`${poolSize}\` ready • History: \`${historyCount}/100\``,
           { ephemeral: true }
         )
       );
@@ -77,7 +114,7 @@ module.exports = {
 
     if (subcommand === "clear") {
       autoplayManager.clearHistory(player.guildId);
-      player.set("prefetchedAutoplayTrack", null);
+      player.set("autoplayPool", null);
       return interaction.reply(
         actionText(
           emojis.reset,

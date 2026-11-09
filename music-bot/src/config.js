@@ -40,6 +40,14 @@ module.exports = {
     gaplessPreload: true, // Pre-resolve next track/autoplay recommendation in background
     minAutoPlayMs: parseInt(process.env.MIN_AUTOPLAY_MS || "5000", 10), // anti-spam guard between autoplay hand-offs
     autoplayTimeoutMs: parseInt(process.env.AUTOPLAY_TIMEOUT_MS || "7000", 10), // hard cap per recommendation lookup
+    // Recommendation pool: ranked ahead of time so autoplay has no gap and the
+    // pick comes from a scored pool instead of the first search result.
+    autoplayPoolSize: parseInt(process.env.AUTOPLAY_POOL_SIZE || "12", 10),
+    autoplayPoolTtlMs: parseInt(process.env.AUTOPLAY_POOL_TTL_MS || "900000", 10), // 15 minutes
+    // A track skipped inside this share of its duration counts as negative
+    // feedback and drops its artist from recommendations for 30 minutes.
+    autoplaySkipPercent: parseInt(process.env.AUTOPLAY_SKIP_PERCENT || "25", 10),
+    autoplayArtistCooldown: parseInt(process.env.AUTOPLAY_ARTIST_COOLDOWN || "2", 10),
     autocompleteCacheTtlMs: 300000, // 5-minute memory cache for instant <1ms autocomplete
     useComponentsV2: process.env.USE_COMPONENTS_V2 !== "false", // Native Discord Components V2 Container (Flags: 32768)
 
@@ -58,6 +66,24 @@ module.exports = {
       previewMaxDurationMs: parseInt(process.env.PREVIEW_MAX_DURATION_MS || "31000", 10), // anything <= 31s is a preview
       upgradeTimeoutMs: parseInt(process.env.UPGRADE_TIMEOUT_MS || "4000", 10), // never add more than 4s of start latency
     },
+  },
+
+  // Node frame-health telemetry (see utils/frameMonitor.js)
+  audio: {
+    // How often node frame counters are sampled. Each sample logs only when
+    // frames were actually dropped, so a healthy node stays quiet.
+    frameLogIntervalMs: parseInt(process.env.FRAME_LOG_INTERVAL_MS || "15000", 10),
+    // A window is reported as unhealthy at this many dropped frames (20ms each).
+    frameWarnDeficitFrames: parseInt(process.env.FRAME_WARN_DEFICIT || "2", 10),
+    // ...or at this drop rate, whichever is hit first.
+    frameWarnRatePercent: parseFloat(process.env.FRAME_WARN_RATE_PERCENT || "1"),
+    // Log clean windows too (debug level) - noisy, off by default.
+    frameLogCleanSamples: process.env.FRAME_LOG_CLEAN === "true",
+    // Correlation: compare sampled dropouts against node CPU, player count and
+    // the number of players that are transcoding, to identify the driver.
+    correlationWindowSamples: parseInt(process.env.FRAME_CORRELATION_WINDOW || "60", 10),
+    correlationMinSamples: parseInt(process.env.FRAME_CORRELATION_MIN_SAMPLES || "5", 10),
+    correlationLogIntervalMs: parseInt(process.env.FRAME_CORRELATION_LOG_INTERVAL_MS || "60000", 10),
   },
 
   // Real-Time Voice Channel Status (VC Status) Engine (No Emojis)
@@ -85,6 +111,11 @@ module.exports = {
       "Join & use /play to listen together",
       "24/7 Studio Sound • Type /play or {prefix}p",
     ],
+  },
+
+  // Text command prefix used when a guild has not chosen one
+  prefix: {
+    default: process.env.DEFAULT_PREFIX || process.env.PREFIX || ".",
   },
 
   // Strict Monochrome Palette (100% Dark Grayscale)

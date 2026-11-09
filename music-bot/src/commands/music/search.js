@@ -50,6 +50,13 @@ module.exports = {
 
   async execute(interaction, client) {
     const query = interaction.options.getString("query");
+    if (!query || !query.trim()) {
+      return interaction.reply({
+        content: `${emojis.warn} Provide a song name or a link to search for.`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
     const forcedSource = interaction.options.getString("source") || audioQuality.resolvePlaybackPlatform();
     const member = interaction.member;
     const voiceChannel = member?.voice?.channel;
@@ -212,14 +219,22 @@ module.exports = {
           allowedMentions: { parse: [], users: [] },
         });
       }
-      player = client.lavalink.createPlayer({
-        guildId: interaction.guildId,
-        voiceChannelId: voiceChannel.id,
-        textChannelId: interaction.channelId,
-        selfDeaf: true,
-        volume: config.player.defaultVolume,
-      });
-      await player.connect();
+
+      // Never create a second player for one guild: reconnect the existing one.
+      if (player) {
+        player.voiceChannelId = voiceChannel.id;
+        player.textChannelId = interaction.channelId || player.textChannelId;
+        await player.connect();
+      } else {
+        player = client.lavalink.createPlayer({
+          guildId: interaction.guildId,
+          voiceChannelId: voiceChannel.id,
+          textChannelId: interaction.channelId,
+          selfDeaf: true,
+          volume: config.player.defaultVolume,
+        });
+        await player.connect();
+      }
     }
 
     player.queue.add(chosenTrack);

@@ -13,6 +13,7 @@ const audioOptimizer = require("../utils/audioOptimizer");
 const audioQuality = require("../utils/audioQuality");
 const audioSelfCheck = require("../utils/audioSelfCheck");
 const playerActions = require("../utils/playerActions");
+const frameMonitor = require("../utils/frameMonitor");
 const stateManager = require("../utils/stateManager");
 const { reconnect247 } = require("../utils/reconnect247");
 
@@ -224,6 +225,10 @@ function initLavalink(client) {
       logger.debug(`[AudioSelfCheck] Skipped: ${err?.message || err}`);
     }
 
+    // Sample frame counters continuously so audible dropouts are attributed to
+    // the node (and the players they hit) instead of being guessed at.
+    frameMonitor.start(client, node);
+
     // Restore active player queues and playback across runner restarts
     await stateManager.restoreState(client);
 
@@ -232,6 +237,7 @@ function initLavalink(client) {
   }));
 
   manager.nodeManager.on("disconnect", (node, reason) => {
+    frameMonitor.stop(node.id);
     logger.warn(`Lavalink node disconnected: ${node.id} - Reason:`, reason);
   });
 
@@ -258,7 +264,13 @@ function initLavalink(client) {
     player.set("voteskips", new Set()); // votes never carry over to the next track
 
     // Record track in autoplay history buffer so it is never repeated
-    autoplayManager.recordTrackPlayed(player.guildId, track.info.identifier, track.info.title);
+    autoplayManager.recordTrackPlayed(player.guildId, track.info.identifier, track.info.title, track.info.author);
+
+    // Timestamp autoplay tracks so an early skip can be used as feedback
+    if (track.isAutoplay) player.set("autoplayTrackStartedAt", Date.now());
+
+    // Baseline the node frame counters for this playback window
+    await frameMonitor.beginTrack(player, track);
 
     // Jockie-style background pre-fetch for 0ms gapless transition
     const isAutoplay = Boolean(player.get("autoplay"));
@@ -297,6 +309,9 @@ function initLavalink(client) {
 
   manager.on("trackEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
     stopRealtimeProgressLoop(player);
+    frameMonitor.endTrack(player, track, client);
+    // Early skips are negative feedback for the recommendation engine
+    autoplayManager.recordOutcome(player, track, client);
     logger.debug(`Finished track "${track.info.title}" in guild ${player.guildId}`);
     const nextTrack = player.queue?.tracks?.[0];
     const hasNext = Boolean(nextTrack) || Boolean(player.get("autoplay"));
@@ -357,6 +372,10 @@ function initLavalink(client) {
         }
       }
     }
+
+    // Autoplay already queued the next track: trackStart owns the dashboard,
+    // voice status and presence from here, so do not tear them down.
+    if (player.queue.current || player.queue.tracks.length > 0) return;
 
     // Reset dedicated song request channel dashboard to ready state
     player.set("ownerId", null);
