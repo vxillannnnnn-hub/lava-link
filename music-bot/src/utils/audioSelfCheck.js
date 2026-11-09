@@ -14,7 +14,11 @@ const logger = require("./logger");
 // Discord requires end-to-end encrypted voice (DAVE) since March 2026.
 const DAVE_MIN_VERSION = [4, 2, 0];
 // This specific release has a DAVE send-path stall (Lavalink issue #1222).
+// Note: As of 2026-11, 4.2.2 remains the latest stable release.
+// The stall is a known upstream issue being tracked:
+// https://github.com/lavalink-devs/Lavalink/issues/1222
 const KNOWN_STALL_VERSION = "4.2.2";
+const STALL_ISSUE_URL = "https://github.com/lavalink-devs/Lavalink/issues/1222";
 
 function parseSemver(value) {
   const match = String(value || "").match(/(\d+)\.(\d+)\.(\d+)/);
@@ -59,7 +63,7 @@ async function runAudioSelfCheck(client, node) {
     );
   } else if (String(version).startsWith(KNOWN_STALL_VERSION)) {
     warnings.push(
-      `Node runs Lavalink ${version}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, issue #1222). Update to the newest 4.2.x build.`
+      `Node runs Lavalink ${version}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, Lavalink issue #1222). This is the latest stable release as of 2026-11; the stall is tracked upstream at ${STALL_ISSUE_URL}.`
     );
   } else {
     notes.push(`Lavalink ${version} supports DAVE`);
