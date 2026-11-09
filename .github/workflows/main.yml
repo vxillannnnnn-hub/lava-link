@@ -133,7 +133,9 @@ jobs:
             if curl -sSL --retry 2 --retry-delay $RETRY_DELAY --connect-timeout 15 --max-time 60 "$CLOUDFLARED_URL" -o /usr/local/bin/cloudflared; then
               if chmod +x /usr/local/bin/cloudflared && [ -x /usr/local/bin/cloudflared ]; then
                 echo "✅ cloudflared installed successfully on attempt $attempt"
-                cloudflared --version
+                file /usr/local/bin/cloudflared
+                echo "Binary info:"
+                file /usr/local/bin/cloudflared
                 SUCCESS=true
                 break
               else
@@ -152,7 +154,7 @@ jobs:
             echo "Falling back to alternative download method..."
             if wget -q --timeout=30 --tries=3 "$CLOUDFLARED_URL" -O /usr/local/bin/cloudflared; then
               chmod +x /usr/local/bin/cloudflared
-              cloudflared --version || echo "⚠️  Binary downloaded but version check failed"
+              file /usr/local/bin/cloudflared || echo "⚠️  Binary downloaded but file check failed"
             else
               echo "::warning::All download methods failed. Cloudflare tunnel will not be available."
             fi
