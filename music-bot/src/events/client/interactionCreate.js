@@ -18,6 +18,10 @@ module.exports = {
         } catch (err) {
           logger.error(`Autocomplete error for /${interaction.commandName}:`, err.message);
         }
+      } else {
+        // Discord requires an acknowledge for every autocomplete interaction.
+        // Staying silent leaves the user with "This interaction failed".
+        await interaction.respond([]).catch(() => {});
       }
       return;
     }

@@ -9,6 +9,21 @@
  */
 
 const logger = require("./logger");
+const config = require("../config");
+
+/**
+ * How many more tracks this player's queue can accept.
+ * A hard cap keeps one user from queueing thousands of tracks and pinning the
+ * whole guild's memory/session snapshot (best-in-class bots all enforce one).
+ *
+ * @param {import("lavalink-client").Player} player
+ * @returns {number}
+ */
+function queueCapacity(player) {
+  const max = Number(config.player?.maxQueueSize) || 500;
+  const current = player?.queue?.tracks?.length || 0;
+  return Math.max(0, max - current);
+}
 
 /**
  * Skip the current track (or jump `skipTo` tracks ahead) without ever throwing.
@@ -108,4 +123,5 @@ module.exports = {
   stopPlayback,
   pausePlayback,
   resumePlayback,
+  queueCapacity,
 };

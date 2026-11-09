@@ -53,6 +53,9 @@ const UNICODE_FALLBACKS = {
   openPlayer: "🎛",
   controls: "🎛",
   pointer: "›",
+  channel: "▤",
+  stage: "◫",
+  users: "◈",
 };
 
 const EMOJI_CONFIG = {
@@ -284,6 +287,11 @@ const CANONICAL_ALIASES = {
 
   // Pointer
   pointer: "pointer",
+
+  // Admin / settings panel glyphs
+  channel: "queue",
+  stage: "queue",
+  users: "dj",
 };
 
 const PRIMARY_BOT_ID = "1568193148222443591";

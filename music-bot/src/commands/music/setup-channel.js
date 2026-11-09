@@ -113,7 +113,9 @@ module.exports = {
 
     // Post the permanent interactive player dashboard
     try {
-      const payload = buildPlaceholderPayload();
+      // Pass the client so clone bots render THEIR application emojis, not the
+      // primary bot's (which Discord rejects in other applications' messages).
+      const payload = buildPlaceholderPayload(client);
       const msg = await channel.send(payload);
 
       // Pin the dashboard for visibility

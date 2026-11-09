@@ -40,7 +40,10 @@ module.exports = {
       if (oldState.id === client.user.id && !newState.channelId) {
         logger.info(`Bot ${client.user?.username} was disconnected from voice channel in guild: ${guildId}`);
         const is247 = Boolean(player?.get("247"));
-        if (player) {
+        // In 24/7 mode the queue is the whole point. Keep the player (and its
+        // queue) alive and let the reconnect engine re-attach it; destroying it
+        // here wiped the queue on every kick or manual move.
+        if (player && !is247) {
           player.destroy("Bot disconnected from voice channel").catch(() => {});
         }
         const timeoutKey = `${guildId}_${client.user.id}`;

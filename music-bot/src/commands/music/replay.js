@@ -3,6 +3,7 @@ const { actionText, errorText } = require("../../utils/responses");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
 const emojis = require("../../utils/emojis");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,6 +14,11 @@ module.exports = {
     const player = client.lavalink.getPlayer(interaction.guildId);
     if (!player || !player.queue.current) {
       return interaction.reply(errorText("No song is currently streaming in this server."));
+    }
+
+    const djCheck = djManager.canManagePlayer(interaction.member, player, false);
+    if (!djCheck.allowed) {
+      return interaction.reply(errorText(djCheck.reason));
     }
 
     if (!player.queue.current.info.isSeekable) {

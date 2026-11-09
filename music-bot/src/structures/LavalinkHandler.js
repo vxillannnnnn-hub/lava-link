@@ -269,8 +269,10 @@ function initLavalink(client) {
     // Timestamp autoplay tracks so an early skip can be used as feedback
     if (track.isAutoplay) player.set("autoplayTrackStartedAt", Date.now());
 
-    // Baseline the node frame counters for this playback window
-    await frameMonitor.beginTrack(player, track);
+    // Baseline the node frame counters for this playback window. Do not await:
+    // it is one extra node REST round-trip and the dashboard should not wait on
+    // it. The baseline is still recorded before the track can end.
+    frameMonitor.beginTrack(player, track).catch(() => {});
 
     // Jockie-style background pre-fetch for 0ms gapless transition
     const isAutoplay = Boolean(player.get("autoplay"));
@@ -414,8 +416,7 @@ function initLavalink(client) {
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
       if (channel) {
-        channel.send({
-          content: `${emojis.warn} Queue finished. Bot will disconnect in 3 minutes if no new music is added.`,
+        channel.send({            content: `${emojis.warn} Queue finished. Bot will disconnect in ${Math.max(1, Math.round(config.player.inactivityTimeoutMs / 60000))} minute(s) if no new music is added.`,
           allowedMentions: { parse: [], users: [] },
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
       }

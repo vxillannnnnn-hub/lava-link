@@ -18,6 +18,7 @@ const { getDashboardPayload, buildNowPlayingComponents } = require("./playerCont
 const { ComponentsV2Container } = require("./componentsV2");
 const { truncate } = require("./formatters");
 const audioQuality = require("./audioQuality");
+const { queueCapacity } = require("./playerActions");
 const emojis = require("./emojis");
 const logger = require("./logger");
 
@@ -127,8 +128,17 @@ async function handleSongRequestMessage(message, client) {
     const query = message.content.trim();
     if (!query) return true;
 
-    const member = message.member;
-    const voiceChannel = member?.voice?.channel;
+    // Resolve voice from live voice states: message.member can be null when the
+    // member cache is cold (large server / no GuildMembers intent).
+    const member =
+      message.member ||
+      (await message.guild.members.fetch(message.author.id).catch(() => null));
+    const voiceState = message.guild.voiceStates.cache.get(message.author.id);
+    const voiceChannel =
+      member?.voice?.channel ||
+      (voiceState?.channelId
+        ? message.guild.channels.cache.get(voiceState.channelId)
+        : null);
 
     if (!voiceChannel) {
       const reply = await message.channel.send({
@@ -176,11 +186,22 @@ async function handleSongRequestMessage(message, client) {
         return true;
       }
 
+      const capacity = queueCapacity(player);
+      if (capacity <= 0) {
+        const reply = await message.channel.send({
+          content: `${emojis.warn} ${message.author}, the queue is full (${config.player.maxQueueSize} tracks). Wait for it to drain or use \`/clear\`.`,
+        }).catch(() => null);
+        if (reply) setTimeout(() => reply.delete().catch(() => {}), 6000);
+        return true;
+      }
+
       if (res.loadType === "playlist") {
         const playlistTracks = await audioQuality.ensureFullQualityTracks(player, res.tracks, member.user);
-        player.queue.add(playlistTracks);
+        const queued = playlistTracks.slice(0, capacity);
+        player.queue.add(queued);
+        const cappedNote = playlistTracks.length > queued.length ? ` Queue cap reached at ${config.player.maxQueueSize}.` : "";
         const reply = await message.channel.send({
-          content: `${emojis.check} Queued playlist **${truncate(res.playlist?.title || "Playlist", 40)}** (${playlistTracks.length} tracks).`,
+          content: `${emojis.check} Queued playlist **${truncate(res.playlist?.title || "Playlist", 40)}** (${queued.length} tracks).${cappedNote}`,
         }).catch(() => null);
         if (reply) setTimeout(() => reply.delete().catch(() => {}), 4000);
       } else {

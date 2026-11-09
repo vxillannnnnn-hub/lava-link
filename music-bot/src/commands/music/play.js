@@ -8,6 +8,7 @@ const config = require("../../config");
 const logger = require("../../utils/logger");
 const audioOptimizer = require("../../utils/audioOptimizer");
 const audioQuality = require("../../utils/audioQuality");
+const { queueCapacity } = require("../../utils/playerActions");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -67,8 +68,10 @@ module.exports = {
 
     // Create or retrieve player
     let player = client.lavalink.getPlayer(interaction.guildId);
+    let createdPlayer = false;
 
     if (!player) {
+      createdPlayer = true;
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
@@ -121,6 +124,9 @@ module.exports = {
         `Voice connect failed in guild ${interaction.guildId}:`,
         connectOutcome.reason?.message || connectOutcome.reason
       );
+      // Do not leak a broken player: it would make every later /play reuse a
+      // dead voice connection.
+      if (createdPlayer) await player.destroy("Voice connect failed").catch(() => {});
       return interaction.editReply(errorText("Could not join the voice channel. Please try `/play` again."));
     }
 
@@ -188,23 +194,33 @@ module.exports = {
           searchRes.tracks,
           interaction.user
         );
-        player.queue.add(tracks);
+
+        const capacity = queueCapacity(player);
+        if (capacity <= 0) {
+          return interaction.editReply(
+            errorText(`The queue is full (${config.player.maxQueueSize} tracks). Wait for it to drain or run \`/clear\`.`)
+          );
+        }
+
+        const queued = tracks.slice(0, capacity);
+        player.queue.add(queued);
         const willPlayNow = !player.playing && !player.paused;
 
         if (willPlayNow) {
           const voiceStatusManager = require("../../utils/voiceStatusManager");
-          if (tracks[0]) voiceStatusManager.onTrackStart(client, player, tracks[0]);
+          if (queued[0]) voiceStatusManager.onTrackStart(client, player, queued[0]);
           await player.play();
         }
 
-        const totalDuration = tracks.reduce((acc, t) => acc + (t.info.duration || 0), 0);
+        const totalDuration = queued.reduce((acc, t) => acc + (t.info.duration || 0), 0);
         const title = truncate(searchRes.playlist?.name || "Curated Playlist", 42);
+        const capNote = tracks.length > queued.length ? ` • Queue capped at ${config.player.maxQueueSize}` : "";
 
         return interaction.editReply(
           actionWithButton(
             emojis.playlist,
-            `Enqueued playlist **${title}** (\`${tracks.length} tracks\`)`,
-            `Total Duration: \`${formatDuration(totalDuration)}\` • Requested by <@${interaction.user.id}>`,
+            `Enqueued playlist **${title}** (\`${queued.length} tracks\`)`,
+            `Total Duration: \`${formatDuration(totalDuration)}\` • Requested by <@${interaction.user.id}>${capNote}`,
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary }
           )
         );

@@ -88,12 +88,13 @@ class AudioOptimizer {
     if (!nextTrack || nextTrack._preloaded) return;
 
     try {
-      // Mark as preloading to avoid duplicate calls
-      nextTrack._preloaded = true;
-
-      // If track has an identifier and node is active, perform background pre-fetch verification
+      // Only mark after the node check: marking first left the track flagged as
+      // warmed even when nothing was pre-fetched.
       const node = player.node;
       if (!node || !node.connected) return;
+
+      // Mark as preloading to avoid duplicate calls
+      nextTrack._preloaded = true;
 
       logger.debug(
         `[AudioOptimizer] Pre-warming next track in queue: "${nextTrack.info?.title}" for guild ${player.guildId}`

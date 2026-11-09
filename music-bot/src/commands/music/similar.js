@@ -4,6 +4,8 @@ const emojis = require("../../utils/emojis");
 const autoplayManager = require("../../utils/autoplayManager");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
+const { queueCapacity } = require("../../utils/playerActions");
+const config = require("../../config");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -41,9 +43,17 @@ module.exports = {
       );
     }
 
-    player.queue.add(recommendations);
+    const capacity = queueCapacity(player);
+    const queued = recommendations.slice(0, capacity);
+    if (!queued.length) {
+      return interaction.editReply(
+        errorText(`The queue is full (${config.player.maxQueueSize} tracks). Wait for it to drain or run \`/clear\`.`)
+      );
+    }
 
-    const list = recommendations
+    player.queue.add(queued);
+
+    const list = queued
       .map(
         (track, index) =>
           `\`${index + 1}.\` ${truncate(cleanTrackTitle(track.info.title), 38)} — ${truncate(
@@ -56,7 +66,7 @@ module.exports = {
     return interaction.editReply(
       actionText(
         emojis.sparkles,
-        `Queued **${recommendations.length}** similar track(s)`,
+        `Queued **${queued.length}** similar track(s)`,
         `Based on **${truncate(cleanTrackTitle(seed.info.title), 35)}** • Mode: \`${mode}\`\n${list}`
       )
     );

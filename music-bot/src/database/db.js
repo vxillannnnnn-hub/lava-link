@@ -324,6 +324,22 @@ function notifyChange() {
   }
 }
 
+// Bulk operations (saving a 200-track queue into a playlist, importing dozens of
+// favorites) call the write helpers in a loop. Checkpointing + re-exporting the
+// whole database on every one of those was O(n^2) disk work, so writes coalesce
+// into a single checkpoint/export shortly after the burst. WAL itself is still
+// durable immediately; only the JSON mirror is delayed by this window.
+let exportTimer = null;
+function scheduleExport() {
+  if (exportTimer) return;
+  exportTimer = setTimeout(() => {
+    exportTimer = null;
+    checkpoint();
+    exportJson();
+  }, 1500);
+  if (exportTimer.unref) exportTimer.unref();
+}
+
 /**
  * Checkpoint WAL to main database file (transfers all writes from bot.db-wal to bot.db)
  */
@@ -568,8 +584,7 @@ module.exports = {
     const cleanPrefix = (newPrefix || ".").trim();
     prefixCache.set(guildId, cleanPrefix);
     const res = stmts.setPrefix.run(guildId, cleanPrefix, Date.now());
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -584,8 +599,7 @@ module.exports = {
     if (!guildId) return;
     const val = enabled ? 1 : 0;
     const res = stmts.upsertMultiOwnership.run(guildId, val, Date.now());
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -596,24 +610,21 @@ module.exports = {
 
   setRequestChannel(guildId, channelId, messageId) {
     const res = stmts.upsertRequestChannel.run(guildId, channelId, messageId, Date.now());
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
 
   clearRequestChannel(guildId) {
     const res = stmts.clearRequestChannel.run(guildId);
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
 
   setDjSettings(guildId, roleId, enabled) {
     const res = stmts.upsertDjSettings.run(guildId, roleId, enabled ? 1 : 0, Date.now());
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -650,8 +661,7 @@ module.exports = {
           stmts.set247.run(guildId, 0, null, null, null, Date.now());
         }
       }
-      checkpoint();
-      exportJson();
+      scheduleExport();
       notifyChange();
       return res;
     } catch (err) {
@@ -727,7 +737,7 @@ module.exports = {
    */
   getAll247BotsForGuild(guildId) {
     try {
-      return stmts.getAll247Bots.all().filter((row) => row.guild_id === guildId);
+      return stmts.getAll247BotsForGuild.all(guildId);
     } catch (err) {
       logger.error(`[Database] Failed to get 24/7 bots for guild ${guildId}:`, err.message);
       return [];
@@ -738,8 +748,7 @@ module.exports = {
   createPlaylist(userId, name) {
     try {
       const res = stmts.createPlaylist.run(userId, name.trim(), Date.now());
-      checkpoint();
-      exportJson();
+      scheduleExport();
       notifyChange();
       return { id: res.lastInsertRowid, name: name.trim() };
     } catch (err) {
@@ -760,8 +769,7 @@ module.exports = {
 
   deletePlaylist(playlistId) {
     const res = stmts.deletePlaylist.run(playlistId);
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -777,8 +785,7 @@ module.exports = {
       track.info.sourceName || "audio",
       Date.now()
     );
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -789,8 +796,7 @@ module.exports = {
 
   removeTrackFromPlaylist(playlistId, id) {
     const res = stmts.removeTrackFromPlaylist.run(playlistId, id);
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -807,8 +813,7 @@ module.exports = {
       track.info.sourceName || "audio",
       Date.now()
     );
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },
@@ -819,8 +824,7 @@ module.exports = {
 
   removeFavorite(userId, uri) {
     const res = stmts.removeFavorite.run(userId, uri);
-    checkpoint();
-    exportJson();
+    scheduleExport();
     notifyChange();
     return res;
   },

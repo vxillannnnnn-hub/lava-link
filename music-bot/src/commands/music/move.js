@@ -3,6 +3,7 @@ const { actionText, errorText } = require("../../utils/responses");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
 const emojis = require("../../utils/emojis");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,6 +20,11 @@ module.exports = {
     const player = client.lavalink.getPlayer(interaction.guildId);
     if (!player || player.queue.tracks.length < 2) {
       return interaction.reply(errorText("Queue needs at least 2 tracks to move positions."));
+    }
+
+    const djCheck = djManager.canManagePlayer(interaction.member, player, false);
+    if (!djCheck.allowed) {
+      return interaction.reply(errorText(djCheck.reason));
     }
 
     const from = interaction.options.getInteger("from");

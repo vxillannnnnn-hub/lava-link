@@ -392,6 +392,7 @@ function startRealtimeProgressLoop(player, client) {
 
   if (timer.unref) timer.unref();
   player._dashboardTimer = timer;
+  player._dashboardTimerKey = timerKey;
   dashboardIntervals.set(timerKey, timer);
 }
 
@@ -410,18 +411,22 @@ function stopRealtimeProgressLoop(player) {
     player._bottomDebounceTimer = null;
   }
 
-  for (const [k, t] of dashboardIntervals.entries()) {
-    if (k.startsWith(player.guildId)) {
-      clearInterval(t);
-      dashboardIntervals.delete(k);
-    }
+  // Fleet-safe cleanup: a single guild can host several bot instances, so only
+  // the timer created for THIS player may be cleared. Matching by guildId
+  // prefix would kill another bot's dashboard in the same server.
+  const dashboardKey = player._dashboardTimerKey;
+  if (dashboardKey && dashboardIntervals.has(dashboardKey)) {
+    clearInterval(dashboardIntervals.get(dashboardKey));
+    dashboardIntervals.delete(dashboardKey);
   }
-  for (const [k, t] of bottomDebounceTimers.entries()) {
-    if (k.startsWith(player.guildId)) {
-      clearTimeout(t);
-      bottomDebounceTimers.delete(k);
-    }
+  player._dashboardTimerKey = null;
+
+  const bottomKey = player._bottomDebounceKey;
+  if (bottomKey && bottomDebounceTimers.has(bottomKey)) {
+    clearTimeout(bottomDebounceTimers.get(bottomKey));
+    bottomDebounceTimers.delete(bottomKey);
   }
+  player._bottomDebounceKey = null;
 }
 
 /**
@@ -448,6 +453,7 @@ function keepDashboardAtBottom(player, client, channel) {
 
   if (timer.unref) timer.unref();
   player._bottomDebounceTimer = timer;
+  player._bottomDebounceKey = timerKey;
   bottomDebounceTimers.set(timerKey, timer);
 }
 
@@ -509,6 +515,13 @@ async function handlePlayerButton(interaction, client) {
     }
 
     let activePlayer = client.lavalink.getPlayer(guildId);
+    // Never hijack a playback session another voice channel is using.
+    if (activePlayer?.voiceChannelId && activePlayer.voiceChannelId !== voiceChannel.id) {
+      return interaction.editReply({
+        content: `${emojis.warn} I am already streaming in <#${activePlayer.voiceChannelId}>. Join that channel first, or stop that session.`,
+      });
+    }
+
     if (!activePlayer) {
       activePlayer = client.lavalink.createPlayer({
         guildId,
@@ -517,7 +530,7 @@ async function handlePlayerButton(interaction, client) {
         selfDeaf: true,
         volume: config.player.defaultVolume,
       });
-      activePlayer.set("autoplay", config.player.defaultAutoplay ?? true);
+      activePlayer.set("autoplay", config.player.defaultAutoplay ?? false);
     }
 
     if (!activePlayer.connected) {
@@ -638,8 +651,17 @@ async function handlePlayerButton(interaction, client) {
           allowedMentions: { parse: [], users: [] },
         });
       }
+      // Capture the interrupted track before play() replaces the current one,
+      // then put it back at the head of the queue so "previous" is reversible.
+      const interruptedTrack = player.queue.current;
       voiceStatusManager.onTrackStart(client, player, prevTrack);
       await player.play({ track: prevTrack });
+      if (
+        interruptedTrack &&
+        interruptedTrack.info?.identifier !== prevTrack.info?.identifier
+      ) {
+        player.queue.add(interruptedTrack, 0);
+      }
       await interaction.reply({
         content: `${emojis.previous} Playing previous: **${truncate(prevTrack.info.title, 45)}**`,
         flags: MessageFlags.Ephemeral,
@@ -1074,7 +1096,14 @@ async function handlePlayerButton(interaction, client) {
     }
 
     default:
-      break;
+      // Pagination buttons on /queue are consumed by that command's own
+      // collector. Everything else here is a stale control from an old message.
+      if (typeof customId === "string" && customId.startsWith("queue_")) return;
+      return interaction.reply({
+        content: `${emojis.warn} This control has expired. Run the command again or open the player with \`/nowplaying\`.`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
   }
 }
 
@@ -1087,6 +1116,31 @@ async function handleFilterSelect(interaction, client) {
   if (!player) {
     return interaction.reply({
       content: `${emojis.cross} No active audio player found in this server.`,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [], users: [] },
+    });
+  }
+
+  // Filters change the audio path for everyone in the channel, so they are a
+  // protected control: same voice channel + DJ permissions when DJ mode is on.
+  if (!interaction.member?.voice?.channelId) {
+    return interaction.reply({
+      content: `${emojis.warn} You must be connected to a voice channel to change audio filters.`,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [], users: [] },
+    });
+  }
+  if (player.voiceChannelId && interaction.member.voice.channelId !== player.voiceChannelId) {
+    return interaction.reply({
+      content: `${emojis.warn} You must be in the same voice channel (<#${player.voiceChannelId}>) to change audio filters.`,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [], users: [] },
+    });
+  }
+  const filterDjCheck = djManager.canManagePlayer(interaction.member, player, false);
+  if (!filterDjCheck.allowed) {
+    return interaction.reply({
+      content: filterDjCheck.reason,
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [], users: [] },
     });

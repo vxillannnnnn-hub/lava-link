@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { actionText, errorText } = require("../../utils/responses");
 const emojis = require("../../utils/emojis");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,6 +23,11 @@ module.exports = {
     const player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) {
       return interaction.reply(errorText("No active audio player found in this server."));
+    }
+
+    const djCheck = djManager.canManagePlayer(interaction.member, player, false);
+    if (!djCheck.allowed) {
+      return interaction.reply(errorText(djCheck.reason));
     }
 
     let mode = interaction.options.getString("mode");

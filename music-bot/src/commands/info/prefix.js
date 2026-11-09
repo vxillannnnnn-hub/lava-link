@@ -20,7 +20,18 @@ module.exports = {
   async execute(interaction, client) {
     const guildId = interaction.guildId;
     const currentPrefix = db.getGuildPrefix(guildId) || config.prefix.default;
-    const newPrefix = interaction.options.getString("new");
+    let newPrefix = interaction.options.getString("new");
+
+    // Prefix form often arrives as `.prefix set m!` (the verb becomes the first
+    // argument). Drop it so the stored prefix is `m!`, not `set`.
+    if (
+      newPrefix &&
+      /^(set|change)$/i.test(newPrefix) &&
+      Array.isArray(interaction.args) &&
+      interaction.args.length > 1
+    ) {
+      newPrefix = interaction.args.slice(1).join(" ").trim();
+    }
 
     // If no argument provided, display the current prefix ephemerally
     if (!newPrefix) {

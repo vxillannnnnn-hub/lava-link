@@ -9,6 +9,31 @@ const emojis = require("./emojis");
 
 class DJManager {
   /**
+   * Human listeners in a voice channel, resolved from live voice states.
+   * `channel.members` only contains cached members, which is wrong on large
+   * servers (and after a restart) and would wrongly let someone bypass DJ mode.
+   */
+  countHumans(guild, channelId, excludeId = null) {
+    if (!guild || !channelId) return 0;
+
+    const knownBots = new Set();
+    try {
+      for (const id of require("./multiBotCoordinator").allBotIds || []) knownBots.add(id);
+    } catch (_) {}
+
+    let humans = 0;
+    for (const voiceState of guild.voiceStates.cache.values()) {
+      if (voiceState.channelId !== channelId || voiceState.id === excludeId) continue;
+      const isBot =
+        voiceState.member?.user?.bot ||
+        guild.members.cache.get(voiceState.id)?.user?.bot ||
+        knownBots.has(voiceState.id);
+      if (!isBot) humans++;
+    }
+    return humans;
+  }
+
+  /**
    * Check if a member has permission to modify audio state
    * @param {import("discord.js").GuildMember} member 
    * @param {import("lavalink-client").Player} player 
@@ -42,13 +67,10 @@ class DJManager {
       return { allowed: true };
     }
 
-    // 3. Alone in voice channel with the bot
+    // 3. Alone in the voice channel with the bot (live voice-state count)
     const voiceChannel = member.voice?.channel;
-    if (voiceChannel) {
-      const nonBots = voiceChannel.members.filter((m) => !m.user.bot);
-      if (nonBots.size === 1 && nonBots.first()?.id === member.id) {
-        return { allowed: true };
-      }
+    if (voiceChannel && this.countHumans(member.guild, voiceChannel.id, member.id) === 0) {
+      return { allowed: true };
     }
 
     // 4. Requester can always skip their own track
@@ -67,7 +89,11 @@ class DJManager {
    */
   getRequiredVotes(voiceChannel) {
     if (!voiceChannel) return 1;
-    const humanCount = voiceChannel.members.filter((m) => !m.user.bot).size;
+    const humanCount = this.countHumans(
+      voiceChannel.guild,
+      voiceChannel.id,
+      null
+    );
     return Math.max(1, Math.ceil(humanCount / 2));
   }
 }

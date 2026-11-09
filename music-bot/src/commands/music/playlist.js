@@ -4,6 +4,48 @@ const { errorText, successText, actionWithButton, actionWithButtons } = require(
 const { truncate, formatDuration } = require("../../utils/formatters");
 const emojis = require("../../utils/emojis");
 const config = require("../../config");
+const audioQuality = require("../../utils/audioQuality");
+const { queueCapacity } = require("../../utils/playerActions");
+
+/**
+ * Resolve and enqueue saved tracks with bounded concurrency.
+ *
+ * The old loop searched one track at a time (a 100-track playlist took over a
+ * minute of dead air) and skipped the full-quality upgrade, so Spotify previews
+ * could end up in the queue. This does both and honours the guild queue cap.
+ */
+async function loadSavedTracks(player, items, requester) {
+  const capacity = queueCapacity(player);
+  if (capacity <= 0) return { added: 0, capped: true };
+
+  const targets = items.slice(0, capacity);
+  const resolved = new Array(targets.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const index = cursor++;
+      const item = targets[index];
+      try {
+        const res = await player.search({ query: item.uri || item.title }, requester);
+        if (res?.tracks?.length) resolved[index] = res.tracks[0];
+      } catch (_) {}
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(4, targets.length) }, () => worker())
+  );
+
+  const playable = await audioQuality.ensureFullQualityTracks(
+    player,
+    resolved.filter(Boolean),
+    requester
+  );
+
+  if (playable.length) player.queue.add(playable);
+  return { added: playable.length, capped: items.length > capacity };
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -159,6 +201,15 @@ module.exports = {
         return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
       }
 
+      const activePlayer = client.lavalink.getPlayer(interaction.guildId);
+      if (activePlayer?.voiceChannelId && activePlayer.voiceChannelId !== voiceChannel.id) {
+        return interaction.reply(
+          errorText(
+            `I am already streaming in <#${activePlayer.voiceChannelId}>. Join that channel first, or stop that session.`
+          )
+        );
+      }
+
       const pl = db.getPlaylist(userId, name);
       if (!pl) {
         return interaction.reply(
@@ -187,36 +238,26 @@ module.exports = {
           selfDeaf: true,
           volume: config.player.defaultVolume,
         });
-        player.set("autoplay", config.player.defaultAutoplay ?? true);
+        player.set("autoplay", config.player.defaultAutoplay ?? false);
       }
 
       if (!player.connected) {
         await player.connect();
       }
 
-      let loadedCount = 0;
-      for (const item of tracks) {
-        try {
-          const res = await player.search({ query: item.uri || item.title }, interaction.user);
-          if (res?.tracks?.length > 0) {
-            player.queue.add(res.tracks[0]);
-            loadedCount++;
-            if (!player.playing && !player.paused && loadedCount === 1) {
-              await player.play();
-            }
-          }
-        } catch {}
-      }
+      const { added, capped } = await loadSavedTracks(player, tracks, interaction.user);
 
       if (!player.playing && !player.paused && player.queue.tracks.length > 0) {
         await player.play();
       }
 
+      const capNote = capped ? ` • Queue cap reached (${config.player.maxQueueSize})` : "";
+
       return interaction.editReply(
         actionWithButtons(
           emojis.music,
-          `Loaded and queued **${loadedCount} tracks** from playlist **${pl.name}**`,
-          `Streaming in <#${voiceChannel.id}>`,
+          `Loaded and queued **${added} tracks** from playlist **${pl.name}**`,
+          `Streaming in <#${voiceChannel.id}>${capNote}`,
           [
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary },
             { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Secondary },
@@ -243,6 +284,15 @@ module.exports = {
         return interaction.reply(errorText(`I lack permission to **Speak** in <#${voiceChannel.id}>.`));
       }
 
+      const activeFavoritesPlayer = client.lavalink.getPlayer(interaction.guildId);
+      if (activeFavoritesPlayer?.voiceChannelId && activeFavoritesPlayer.voiceChannelId !== voiceChannel.id) {
+        return interaction.reply(
+          errorText(
+            `I am already streaming in <#${activeFavoritesPlayer.voiceChannelId}>. Join that channel first, or stop that session.`
+          )
+        );
+      }
+
       const favorites = db.getFavorites(userId);
       if (!favorites || favorites.length === 0) {
         return interaction.reply(
@@ -264,36 +314,26 @@ module.exports = {
           selfDeaf: true,
           volume: config.player.defaultVolume,
         });
-        player.set("autoplay", config.player.defaultAutoplay ?? true);
+        player.set("autoplay", config.player.defaultAutoplay ?? false);
       }
 
       if (!player.connected) {
         await player.connect();
       }
 
-      let loadedCount = 0;
-      for (const item of favorites) {
-        try {
-          const res = await player.search({ query: item.uri || item.title }, interaction.user);
-          if (res?.tracks?.length > 0) {
-            player.queue.add(res.tracks[0]);
-            loadedCount++;
-            if (!player.playing && !player.paused && loadedCount === 1) {
-              await player.play();
-            }
-          }
-        } catch {}
-      }
+      const { added, capped } = await loadSavedTracks(player, favorites, interaction.user);
 
       if (!player.playing && !player.paused && player.queue.tracks.length > 0) {
         await player.play();
       }
 
+      const capNote = capped ? ` • Queue cap reached (${config.player.maxQueueSize})` : "";
+
       return interaction.editReply(
         actionWithButtons(
           emojis.heart,
-          `Loaded and queued **${loadedCount} favorites** from your personal collection`,
-          `Streaming in <#${voiceChannel.id}>`,
+          `Loaded and queued **${added} favorites** from your personal collection`,
+          `Streaming in <#${voiceChannel.id}>${capNote}`,
           [
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary },
             { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Secondary },

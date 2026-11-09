@@ -4,6 +4,7 @@ const emojis = require("../../utils/emojis");
 const autoplayManager = require("../../utils/autoplayManager");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -47,6 +48,15 @@ module.exports = {
     }
 
     const subcommand = interaction.options.getSubcommand() || "toggle";
+
+    // Autoplay and its mode change what everyone hears, so they follow the
+    // same DJ protection as the rest of the playback controls.
+    if (subcommand === "toggle" || subcommand === "mode") {
+      const djCheck = djManager.canManagePlayer(interaction.member, player, false);
+      if (!djCheck.allowed) {
+        return interaction.reply(errorText(djCheck.reason));
+      }
+    }
 
     if (subcommand === "toggle") {
       const explicitState = interaction.options.getBoolean("enabled");

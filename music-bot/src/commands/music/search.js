@@ -124,8 +124,9 @@ module.exports = {
     const searchId = `${interaction.guildId}_${interaction.user.id}_${Date.now()}`;
     activeSearches.set(searchId, { tracks, player, userId: interaction.user.id });
 
-    // Clean up cache after 60 seconds
-    setTimeout(() => activeSearches.delete(searchId), 60000);
+    // Clean up cache after 60 seconds (unref'd so it never holds the process open)
+    const searchCacheTimer = setTimeout(() => activeSearches.delete(searchId), 60000);
+    if (searchCacheTimer.unref) searchCacheTimer.unref();
 
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId(`select_search_${searchId}`)
@@ -209,6 +210,21 @@ module.exports = {
       });
     }
 
+    // A second voice channel must not hijack an active session's playback.
+    const memberVoiceChannelId = interaction.member?.voice?.channelId;
+    const connectedPlayer = client.lavalink.getPlayer(interaction.guildId);
+    if (
+      connectedPlayer?.connected &&
+      connectedPlayer.voiceChannelId &&
+      memberVoiceChannelId !== connectedPlayer.voiceChannelId
+    ) {
+      return interaction.reply({
+        content: `${emojis.warn} I am already playing in <#${connectedPlayer.voiceChannelId}>. Join that channel to add tracks.`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+
     let player = client.lavalink.getPlayer(interaction.guildId);
     if (!player || !player.connected) {
       const voiceChannel = interaction.member?.voice?.channel;
@@ -237,19 +253,26 @@ module.exports = {
       }
     }
 
-    player.queue.add(chosenTrack);
+    // Search hits are often metadata previews or low-bitrate mirrors; upgrade
+    // to the full-quality source before the track reaches the queue.
+    const playableTrack = await audioQuality.ensureFullQualityTrack(
+      player,
+      chosenTrack,
+      interaction.user
+    );
+    player.queue.add(playableTrack);
 
     if (!player.playing && !player.paused) {
       const voiceStatusManager = require("../../utils/voiceStatusManager");
-      voiceStatusManager.onTrackStart(client, player, chosenTrack);
+      voiceStatusManager.onTrackStart(client, player, playableTrack);
       await player.play();
     }
 
     activeSearches.delete(searchId);
 
-    const cleanTitle = truncate(cleanTrackTitle(chosenTrack.info.title), 40);
-    const cleanAuthor = truncate(chosenTrack.info.author, 24);
-    const uri = chosenTrack.info.uri || "https://discord.com";
+    const cleanTitle = truncate(cleanTrackTitle(playableTrack.info.title), 40);
+    const cleanAuthor = truncate(playableTrack.info.author, 24);
+    const uri = playableTrack.info.uri || "https://discord.com";
     const pos = player.queue.tracks.length;
 
     await interaction.update({

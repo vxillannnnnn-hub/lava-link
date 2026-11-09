@@ -101,7 +101,11 @@ class StateManager {
         sessions,
       };
 
-      fs.writeFileSync(STATE_FILE, JSON.stringify(payload, null, 2), "utf8");
+      // Atomic write: a crash mid-write must never leave a truncated snapshot
+      // that the next runner then refuses to parse.
+      const tmpStateFile = `${STATE_FILE}.tmp.${Date.now()}`;
+      fs.writeFileSync(tmpStateFile, JSON.stringify(payload, null, 2), "utf8");
+      fs.renameSync(tmpStateFile, STATE_FILE);
 
       if (sessions.length > 0) {
         logger.info(`[StateManager] Saved ${sessions.length} active voice session(s) across fleet to disk.`);
@@ -310,11 +314,13 @@ class StateManager {
     }
 
     // 3. Process exit handlers (SIGTERM / SIGINT)
+    // The entry point owns the shutdown: it destroys players and then exits.
+    // Exiting here too raced that cleanup and could terminate the process with
+    // voice connections still open.
     const onExit = (signal) => {
       logger.info(`[StateManager] Received ${signal}. Executing final database checkpoint, state snapshot & sync...`);
       this.saveState();
       this.syncToGitSync();
-      process.exit(0);
     };
 
     process.once("SIGINT", () => onExit("SIGINT"));

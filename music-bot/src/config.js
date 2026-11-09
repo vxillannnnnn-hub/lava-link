@@ -34,6 +34,8 @@ module.exports = {
     // decoding/re-encoding. That is the highest fidelity path Discord can accept.
     defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "ytmsearch", // ytmsearch, ytsearch, scsearch, spsearch, jssearch
     maxPreviousTracks: 25,
+    // Hard cap on upcoming tracks per guild (abuse/memory guard).
+    maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "500", 10),
     inactivityTimeoutMs: parseInt(process.env.INACTIVITY_TIMEOUT_MS || "180000", 10), // 3 minutes
     emptyChannelTimeoutMs: parseInt(process.env.EMPTY_CHANNEL_TIMEOUT_MS || "120000", 10), // 2 minutes
     autoReconnect: true,
