@@ -62,7 +62,7 @@ function getCategoryEmbed(category, client) {
           { name: "`/filter preset: karaoke`", value: "Center vocal frequency attenuation for sing-along." },
           { name: "`/filter preset: pop / rock`", value: "Custom tuned acoustic multi-band equalizer curves." },
           { name: "`/filter preset: reset`", value: "Restore neutral 0ms-latency direct Opus passthrough." },
-          { name: "`/volume <0-200>`", value: "Adjust playback volume percentage." }
+          { name: "`/volume <0-100>`", value: "Adjust playback volume (clipping-safe: 100% is unity gain / lossless passthrough)." }
         );
       break;
 
@@ -80,6 +80,7 @@ function getCategoryEmbed(category, client) {
           { name: "`/247`", value: "Toggle 24/7 continuous voice channel stay mode." },
           { name: "`/stats`", value: "View real-time Lavalink node memory, CPU, ZGC latency, and active players." },
           { name: "`/ping`", value: "Check Discord WebSocket ping and Lavalink node roundtrip latency." },
+          { name: "`/audio`", value: "Diagnose the live audio path: source, codec (Opus passthrough vs re-encode), channel bitrate and node frame drops." },
           { name: "`/help`", value: "View this interactive command guidebook." }
         );
       break;

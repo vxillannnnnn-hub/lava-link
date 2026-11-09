@@ -4,6 +4,7 @@ const { actionText, errorText } = require("../../utils/responses");
 const { truncate } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
 const emojis = require("../../utils/emojis");
+const playerActions = require("../../utils/playerActions");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -30,7 +31,7 @@ module.exports = {
     const djCheck = djManager.canManagePlayer(member, player, true);
     if (djCheck.allowed) {
       const skippedTitle = truncate(cleanTrackTitle(player.queue.current.info.title), 40);
-      await player.skip();
+      await playerActions.skipCurrent(player, 0);
       return interaction.reply(
         actionText(emojis.skip, `Skipped **${skippedTitle}** directly via DJ permissions.`)
       );
@@ -54,7 +55,7 @@ module.exports = {
     if (currentVotes >= requiredVotes) {
       const skippedTitle = truncate(cleanTrackTitle(player.queue.current.info.title), 40);
       player.set("voteskips", new Set());
-      await player.skip();
+      await playerActions.skipCurrent(player, 0);
 
       return interaction.reply(
         actionText(

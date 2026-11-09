@@ -182,7 +182,7 @@ npm run dev
 | `/previous` | Rewind to previous track from session history |
 | `/replay` | Replay current song from 0:00 |
 | `/seek <time>` | Seek to timestamp (`1:30`, `90s`, `2m`) |
-| `/volume <0-200>` | Set playback volume percentage |
+| `/volume <0-100>` | Set playback volume (100% = unity gain, clipping-safe) |
 | `/filter <preset>` | Apply 8D, Bassboost, Nightcore, Vaporwave, Karaoke, or EQ |
 | `/loop <mode>` | Cycle repeat mode (`off`, `track`, `queue`) |
 | `/shuffle` | Randomize upcoming queue tracks |
@@ -198,6 +198,7 @@ npm run dev
 | `/stop` | Stop playback, purge queue, and leave voice channel |
 | `/stats` | View real-time Lavalink ZGC latency, RAM, CPU & player count |
 | `/ping` | Test Discord gateway and Lavalink node latency |
+| `/audio` | Diagnose source, codec path, channel bitrate and node frame drops |
 | `/help` | Comprehensive interactive guidebook |
 
 ---
@@ -228,3 +229,23 @@ Your bot connects directly to:
 - **Port**: `443` (WSS / HTTPS)
 - **Engine**: Lavalink v4.2.2 on Java 21 Generational ZGC
 - **Plugins**: SolaceAudio v1.0.18, LavaSrc v4.3.0, YouTube Plugin v2be8e54, LavaSearch v1.0.0
+
+---
+
+## 🔊 Audio Quality & Latency
+
+Discord voice only accepts Opus, and Lavalink can only forward Opus packets untouched when the source already is Opus. That single fact drives every quality decision:
+
+1. **Opus-native sources by default.** `DEFAULT_SEARCH_PLATFORM=ytmsearch` (YouTube Music) delivers full-length Opus at ~160 kbps, so Lavaplayer forwards packets to Discord without decoding and re-encoding. Set it in `.env` — the shipped default only applies when the variable is absent.
+2. **No more 30-second songs.** `src/utils/audioQuality.js` detects preview/clip resolutions (Spotify/Deezer/Apple/Tidal/JioSaavn without node credentials) and replaces them with a full-length Opus match before they reach the queue. Set `UPGRADE_METADATA_SOURCES=true` to route *every* metadata-only track through this path. All lookups are time-boxed to `UPGRADE_TIMEOUT_MS` so they can never add noticeable start latency.
+3. **Faster time-to-first-audio.** `/play` now performs the voice handshake and the track resolution in parallel instead of one after another, removing a full round-trip (~200-1500 ms) from every cold start.
+4. **Channel bitrate.** The bot raises the voice channel to the guild's maximum permitted bitrate (96/128/256/384 kbps depending on boost tier) when it has `Manage Channels`.
+5. **Autoplay never queues previews or clips.**
+6. **Diagnose real dropouts with `/ping`.** It now reports Lavalink `frameStats` (`sent / padded / dropped`). A non-zero dropped count means the node is under-resourced or its route to Discord is bad — that is what listeners hear as crackling, and it cannot be fixed from the bot process.
+
+### Node-side checklist (`lavalink/application.yml`)
+
+- Run the **newest Lavalink 4.2.x** build. 4.2.2 has a DAVE audio send-path regression that freezes the outgoing voice stream 100-400 ms about once per second ([issue #1222](https://github.com/lavalink-devs/Lavalink/issues/1222)).
+- `opusEncodingQuality: 10`, `resamplingQuality: MEDIUM`, `bufferDurationMs: 400`, `frameBufferDurationMs: 5000` (all set in the shipped config).
+- YouTube needs the `youtube-source` plugin; datacenter IPs need OAuth for stable full-quality playback. Spotify needs `lavasrc` credentials (otherwise → 30s previews).
+- Host the node in the same region as the voice channels, with dedicated CPU: frame drops come from CPU starvation and GC pauses, not from ping.

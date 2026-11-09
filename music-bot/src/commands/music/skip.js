@@ -4,6 +4,7 @@ const { truncate, formatDuration } = require("../../utils/formatters");
 const { cleanTrackTitle } = require("../../utils/sourceManager");
 const emojis = require("../../utils/emojis");
 const djManager = require("../../utils/djManager");
+const playerActions = require("../../utils/playerActions");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,17 +34,18 @@ module.exports = {
       }
 
       const targetTrack = player.queue.tracks[jumpTo - 1];
-      player.queue.tracks.splice(0, jumpTo - 1);
       const voiceStatusManager = require("../../utils/voiceStatusManager");
       if (targetTrack) {
         voiceStatusManager.onTrackStart(client, player, targetTrack);
-      } else if (!player.get("autoplay")) {
-        voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
       }
-      await player.skip();
 
-      const nextTrack = player.queue.tracks[0];
-      const sub = nextTrack ? `Now playing: **${truncate(cleanTrackTitle(nextTrack.info.title), 35)}**` : "Queue reached the end";
+      // skip(jumpTo) drops the tracks before the target and advances to it.
+      // Splicing the queue manually as well would skip one track too many.
+      await playerActions.skipCurrent(player, jumpTo);
+
+      const sub = targetTrack
+        ? `Now playing: **${truncate(cleanTrackTitle(targetTrack.info.title), 35)}**`
+        : "Queue reached the end";
 
       return interaction.reply(
         actionWithButton(
@@ -62,7 +64,9 @@ module.exports = {
     } else if (!player.get("autoplay")) {
       voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
     }
-    await player.skip();
+    // Never throws: skipping the last track with an empty queue hands over to
+    // autoplay instead of raising "Can't skip more than the queue size".
+    await playerActions.skipCurrent(player, 0);
 
     const sub = nextTrack
       ? `Up next: **${truncate(cleanTrackTitle(nextTrack.info.title), 35)}** • \`${formatDuration(nextTrack.info.duration)}\``

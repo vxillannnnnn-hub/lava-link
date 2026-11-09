@@ -1,0 +1,145 @@
+###############################################################################
+# Pulse - Lavalink v4 configuration for studio-grade, low-latency audio
+#
+# This is the node-side half of the audio quality work. The bot client can only
+# choose a good source and keep Opus passthrough intact; everything below is
+# what actually decides whether the audio arrives clean.
+#
+# RUN THE LATEST 4.2.x (or newer) BUILD
+#   Lavalink 4.2.2 has a known audio send-path regression with DAVE (Discord's
+#   mandatory end-to-end voice encryption): the outgoing voice stream stalls
+#   100-400ms roughly once per second, which listeners hear as constant
+#   crackling / micro-dropouts even though ping is low.
+#   See https://github.com/lavalink-devs/Lavalink/issues/1222
+#   Always run the newest 4.2.x release, not a pinned 4.2.2 jar.
+#
+# JVM (the flags matter as much as the yml):
+#   java -XX:+UseZGC -XX:+ZGenerational -Xms1G -Xmx1G \
+#        -XX:+AlwaysPreTouch -XX:+PerfDisableSharedMem \
+#        -jar Lavalink.jar
+#   - Never run Lavalink on a CPU-limited/throttled shared runner; frame drops
+#     come from CPU starvation and GC pauses, not from the bot process.
+#   - Put the node in the same region as the voice channels it serves. The audio
+#     path is Node -> Discord voice server (UDP), not Node -> your bot.
+###############################################################################
+
+server: # REST and WS server
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    # Required for YouTube in Lavalink v4 (the built-in source is deprecated and
+    # no longer yields playable streams). Provides Opus-native audio, so packets
+    # are forwarded without re-encoding.
+    # OAuth on the TV client is what keeps playback stable and full quality from
+    # datacenter IPs - see https://github.com/lavalink-devs/youtube-source
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
+      snapshot: false
+    # Spotify / Apple Music / Deezer / Tidal metadata + full-length audio mirror.
+    # WITHOUT spotify credentials `spsearch:` only returns 30 second previews.
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+
+  server:
+    password: "${LAVALINK_PASSWORD:youshallnotpass}"
+    sources:
+      youtube: false # handled by the youtube plugin above
+      bandcamp: true
+      soundcloud: true # SoundCloud serves Opus too - good quality, no transcode
+      twitch: true
+      vimeo: true
+      http: true # direct Icecast/Shoutcast/MP3 streams
+      local: false
+
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+
+    # --- Audio quality / latency knobs ---------------------------------------
+    # JDA-NAS buffer. 400ms is the safe default: it rides through normal GC
+    # pauses. Drop to ~250 only if you have measured smooth playback; raise to
+    # 800-1000 if the node is shared and you hear periodic gaps.
+    bufferDurationMs: 400
+    # How much decoded audio is kept buffered. 5000ms = resilient to jitter.
+    frameBufferDurationMs: 5000
+    # Opus encoder quality, 0-10. Only used when the source is NOT already Opus
+    # (mirrors, MP3 streams, livestreams). 10 = best fidelity.
+    opusEncodingQuality: 10
+    # Resampling quality, LOW/MEDIUM/HIGH. HIGH costs CPU but removes the
+    # "muffled / metallic" character of 44.1kHz -> 48kHz resampling.
+    resamplingQuality: MEDIUM
+    # Detect a stalled stream sooner so the bot skips a broken track instead of
+    # leaving the channel silent.
+    trackStuckThresholdMs: 5000
+    # Seek while the buffered audio keeps playing - no gap when users seek.
+    useSeekGhosting: true
+    # Accurate playback position for progress bars and resume-after-restart.
+    playerUpdateInterval: 1
+    youtubePlaylistLoadLimit: 6
+    gc-warnings: true
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # Prefer clients that return Opus formats (no transcoding) and stay signed
+    # in. Add oauth below with a refresh token for maximum stability:
+    #   oauth:
+    #     enabled: true
+    #     refreshToken: "YOUR_REFRESH_TOKEN"
+    clients:
+      - MUSIC
+      - WEB
+      - MWEB
+      - TVHTML5_SIMPLY
+      - ANDROID_VR
+
+  lavasrc:
+    providers:
+      - "ytmsearch:\"%ISRC%\""
+      - "ytmsearch:%QUERY%"
+      - "ytsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: false # enable + set credentials below for full-length Spotify audio
+      applemusic: false
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+      youtube: true
+    # Full-length Spotify audio (never previews) requires these. Without them
+    # Spotify resolves to 30s previews, which is the "bot plays 30 seconds and
+    # stops" symptom.
+    # spotify:
+    #   clientId: "YOUR_SPOTIFY_CLIENT_ID"
+    #   clientSecret: "YOUR_SPOTIFY_CLIENT_SECRET"
+    #   countryCode: "US"
+    #   playlistLoadLimit: 6
+    #   albumLoadLimit: 6
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+logging:
+  file:
+    path: ./logs/
+  level:
+    root: INFO
+    lavalink: INFO

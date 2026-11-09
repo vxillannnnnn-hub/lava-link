@@ -7,6 +7,7 @@ const emojis = require("../../utils/emojis");
 const config = require("../../config");
 const logger = require("../../utils/logger");
 const audioOptimizer = require("../../utils/audioOptimizer");
+const audioQuality = require("../../utils/audioQuality");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -75,10 +76,6 @@ module.exports = {
       player.set("autoplay", config.player.defaultAutoplay ?? false);
     }
 
-    if (!player.connected) {
-      await player.connect();
-    }
-
     if (!player.get("ownerId")) {
       player.set("ownerId", interaction.user?.id || interaction.author?.id);
     }
@@ -87,9 +84,10 @@ module.exports = {
     player.set("lastVoiceChannelId", voiceChannel.id);
     audioOptimizer.maximizeVoiceBitrate(voiceChannel, client);
 
-    // Fast resolution on Lavalink node
-    let searchRes;
-    try {
+    // Resolve the query and complete the voice handshake in parallel. Lavalink
+    // only needs the voice credentials before the first frame, so overlapping
+    // both removes the full connection round-trip from time-to-first-audio.
+    const searchPromise = (async () => {
       const isUrl = /^https?:\/\//i.test(query);
       const isPrefixed = /^(ytsearch|ytmsearch|spsearch|scsearch|jssearch):/i.test(query);
 
@@ -99,15 +97,36 @@ module.exports = {
         formattedQuery = `${prefix}:${query}`;
       }
 
-      searchRes = await player.search({ query: formattedQuery }, interaction.user);
+      let resolved = await player.search({ query: formattedQuery }, interaction.user);
 
-      if ((!searchRes || !searchRes.tracks || searchRes.tracks.length === 0) && !isUrl && !forcedSource) {
-        searchRes = await player.search({ query: `ytsearch:${query}` }, interaction.user);
+      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl && !forcedSource) {
+        resolved = await player.search({ query: `ytsearch:${query}` }, interaction.user);
       }
-    } catch (err) {
-      logger.error("Player search failed:", err);
-      return interaction.editReply(errorText(`Failed to resolve audio: \`${err.message}\``));
+
+      return resolved;
+    })();
+
+    const [connectOutcome, searchOutcome] = await Promise.allSettled([
+      player.connected ? Promise.resolve() : player.connect(),
+      searchPromise,
+    ]);
+
+    if (connectOutcome.status === "rejected") {
+      logger.error(
+        `Voice connect failed in guild ${interaction.guildId}:`,
+        connectOutcome.reason?.message || connectOutcome.reason
+      );
+      return interaction.editReply(errorText("Could not join the voice channel. Please try `/play` again."));
     }
+
+    if (searchOutcome.status === "rejected") {
+      logger.error("Player search failed:", searchOutcome.reason);
+      return interaction.editReply(
+        errorText(`Failed to resolve audio: \`${searchOutcome.reason?.message || searchOutcome.reason}\``)
+      );
+    }
+
+    const searchRes = searchOutcome.value;
 
     if (!searchRes || !searchRes.tracks || searchRes.tracks.length === 0) {
       return interaction.editReply(errorText(`No tracks found matching \`${query}\`.`));
@@ -116,7 +135,9 @@ module.exports = {
     switch (searchRes.loadType) {
       case "track":
       case "search": {
-        const track = searchRes.tracks[0];
+        // Never stream a 30s preview or a low-bitrate mirror when a full-length
+        // Opus source for the same song is available.
+        const track = await audioQuality.ensureFullQualityTrack(player, searchRes.tracks[0], interaction.user);
         player.queue.add(track);
         const position = player.queue.tracks.length;
         const willPlayNow = !player.playing && !player.paused;

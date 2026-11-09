@@ -10,6 +10,9 @@ const emojis = require("../utils/emojis");
 const voiceStatusManager = require("../utils/voiceStatusManager");
 const presenceManager = require("../utils/presenceManager");
 const audioOptimizer = require("../utils/audioOptimizer");
+const audioQuality = require("../utils/audioQuality");
+const audioSelfCheck = require("../utils/audioSelfCheck");
+const playerActions = require("../utils/playerActions");
 const stateManager = require("../utils/stateManager");
 const { reconnect247 } = require("../utils/reconnect247");
 
@@ -151,18 +154,22 @@ function initLavalink(client) {
     playerOptions: {
       defaultSearchPlatform: config.player.defaultSearchPlatform,
       applyVolumeAsFilter: false, // Opus Direct Passthrough: skip PCM transcoding when volume = 100
-      minAutoPlayMs: 0, // Never throttle or block autoplay on track completion
+      minAutoPlayMs: config.player.minAutoPlayMs, // anti-spam guard between autoplay hand-offs
       onDisconnect: {
         autoReconnect: config.player.autoReconnect,
         destroyPlayer: false, // Keep session alive on network glitch
       },
       onEmptyQueue: {
         destroyAfterMs: config.player.inactivityTimeoutMs,
-        // Native Jockie-style Autoplay Hook (executed when last track finishes)
+        // Native autoplay hook: the ONLY place autoplay adds tracks when the
+        // queue runs out. lavalink-client plays whatever we queue here.
         autoPlayFunction: async (player, track) => {
-          const isAutoplay = Boolean(player.get("autoplay"));
-          if (isAutoplay) {
+          try {
+            if (!Boolean(player.get("autoplay"))) return;
             await autoplayManager.executeAutoplay(player, track, true);
+          } catch (err) {
+            // Never throw into the client - a throw here aborts its queue handling
+            logger.warn(`[Autoplay] Hook failed in guild ${player.guildId}: ${err?.message || err}`);
           }
         },
       },
@@ -171,6 +178,15 @@ function initLavalink(client) {
       maxPreviousTracks: config.player.maxPreviousTracks,
     },
   });
+
+  // Warn when playback is pinned to a metadata-only platform: those streams are
+  // mirrors that often have to be re-encoded, while YouTube Music ships Opus and
+  // is forwarded to Discord untouched.
+  if (audioQuality.isMetadataOnlyPlatform(config.player.defaultSearchPlatform)) {
+    logger.warn(
+      `[AudioQuality] DEFAULT_SEARCH_PLATFORM is "${config.player.defaultSearchPlatform}" (metadata-only). For maximum fidelity set DEFAULT_SEARCH_PLATFORM=ytmsearch; previews from this platform will still be repaired automatically.`
+    );
+  }
 
   // Helper to ensure asynchronous event callbacks never throw unhandled rejections
   const safeAsync = (fn) => (...args) => {
@@ -193,6 +209,14 @@ function initLavalink(client) {
       logger.lavalink(`Session resuming armed (timeout: ${config.lavalink.sessionResumeTimeout}s). Reconnects guaranteed < 50ms.`);
     } catch (err) {
       logger.debug("Session resume update warning:", err.message);
+    }
+
+    // Report anything that silently degrades audio (outdated build, missing
+    // providers, CPU pressure, dropped frames) before any player starts.
+    try {
+      await audioSelfCheck.runAudioSelfCheck(client, node);
+    } catch (err) {
+      logger.debug(`[AudioSelfCheck] Skipped: ${err?.message || err}`);
     }
 
     // Restore active player queues and playback across runner restarts
@@ -226,6 +250,7 @@ function initLavalink(client) {
     // Always cache last played track so autoplay has an immutable recommendation seed
     player.set("lastPlayedTrack", track);
     player.set("autoPaused", false);
+    player.set("voteskips", new Set()); // votes never carry over to the next track
 
     // Record track in autoplay history buffer so it is never repeated
     autoplayManager.recordTrackPlayed(player.guildId, track.info.identifier, track.info.title);
@@ -233,7 +258,7 @@ function initLavalink(client) {
     // Jockie-style background pre-fetch for 0ms gapless transition
     const isAutoplay = Boolean(player.get("autoplay"));
     if (isAutoplay && player.queue.tracks.length === 0) {
-      autoplayManager.prefetchAutoplay(player, track);
+      autoplayManager.prefetchAutoplay(player, track).catch(() => {});
     } else if (player.queue.tracks.length > 0) {
       // Pre-warm the next queued track for 0ms instantaneous track transition
       audioOptimizer.preloadNextQueueTrack(player);
@@ -290,7 +315,7 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
       }
     }
-    await player.skip().catch(() => {});
+    await playerActions.skipCurrent(player, 0);
   })));
 
   manager.on("trackError", safeAsync((player, track, payload) => emojis.runWithClient(client, async () => {
@@ -305,16 +330,19 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
       }
     }
-    await player.skip().catch(() => {});
+    await playerActions.skipCurrent(player, 0);
   })));
 
   manager.on("queueEnd", safeAsync((player, track) => emojis.runWithClient(client, async () => {
     stopRealtimeProgressLoop(player);
     logger.info(`Queue ended in guild ${player.guildId}`);
 
-    // If Autoplay is enabled, execute fallback recommendation
+    // Safety net only: lavalink-client already ran the autoplay hook before
+    // emitting queueEnd. If it resolved a track we must not resolve a second one.
     const isAutoplay = Boolean(player.get("autoplay"));
-    if (isAutoplay && !player.queue.current) {
+    const hookHandledAt = Number(player.get("autoplayHandledAt")) || 0;
+    const hookJustHandled = Date.now() - hookHandledAt < 2000;
+    if (isAutoplay && !player.queue.current && !hookJustHandled) {
       const lastTrack = track || player.queue.previous[0] || player.get("lastPlayedTrack");
       if (lastTrack) {
         const success = await autoplayManager.executeAutoplay(player, lastTrack, false);

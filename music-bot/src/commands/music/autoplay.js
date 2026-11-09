@@ -42,9 +42,9 @@ module.exports = {
       const seedTrack = player.queue.current || player.queue.previous[0] || player.get("lastPlayedTrack");
       if (newState && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
-          autoplayManager.executeAutoplay(player, seedTrack, false);
+          await autoplayManager.executeAutoplay(player, seedTrack, false);
         } else {
-          autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack);
         }
       }
 
@@ -77,6 +77,7 @@ module.exports = {
 
     if (subcommand === "clear") {
       autoplayManager.clearHistory(player.guildId);
+      player.set("prefetchedAutoplayTrack", null);
       return interaction.reply(
         actionText(
           emojis.reset,

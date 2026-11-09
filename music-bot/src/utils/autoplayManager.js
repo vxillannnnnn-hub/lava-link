@@ -1,16 +1,31 @@
 /**
- * Advanced Jockie-Style Autoplay Recommendation Engine
- * Features:
- * - 4-Stage Fallback Cascade: YouTube RD Mix -> Spotify Related -> YTM Acoustic -> General YT
- * - Cross-Platform Duplicate Prevention (Matches both track identifier and normalized title)
- * - Guild Playback History Cache (stores up to 100 tracks to prevent loop cycles)
- * - 0ms Gapless Background Pre-Buffering
- * - Requester Attribution & Seed Tracking
- * - Seamless integration with Lavalink v4.2.2 & lavalink-client v2
+ * Autoplay recommendation engine (Jockie / Eara behaviour)
+ * ---------------------------------------------------------------------------
+ * How the good bots actually keep music flowing:
+ *   1. The seed is the track that just ended, never the queue head.
+ *   2. The first strategy is the platform's own radio/related endpoint
+ *      (YouTube Mix `list=RD<videoId>`), which is what Jockie and Eara use -
+ *      it returns tracks in the same vibe instead of "songs with a similar title".
+ *   3. The next recommendation is resolved *while the current track is still
+ *      playing* and cached, so the hand-off has no silent gap.
+ *   4. Everything is deduplicated against the queue and a rolling history, so
+ *      the same song never loops back.
+ *   5. Previews, livestreams and podcasts never enter autoplay.
+ *
+ * Playback itself is owned by lavalink-client: the manager's
+ * `onEmptyQueue.autoPlayFunction` is the single entry point and adds a track to
+ * the queue; the client then starts it. This module never fights the client for
+ * ownership and never throws into it.
  */
 
 const { cleanTrackTitle } = require("./sourceManager");
+const config = require("../config");
 const logger = require("./logger");
+
+const PREVIEW_MAX_MS = config.player?.quality?.previewMaxDurationMs ?? 31000;
+const MIN_TRACK_MS = Math.max(45000, PREVIEW_MAX_MS);
+const MAX_TRACK_MS = 900000; // 15 minutes: skip podcasts / long mixes
+const RESOLVE_TIMEOUT_MS = config.player?.autoplayTimeoutMs ?? 7000;
 
 class AutoplayManager {
   constructor(maxHistoryPerGuild = 100) {
@@ -93,241 +108,267 @@ class AutoplayManager {
   }
 
   /**
-   * Sift candidate tracks and pick the highest-affinity track not in history
+   * Pick the highest-affinity candidate that is not the current track, not
+   * already queued, not in history, and not a preview / stream / podcast.
+   *
+   * @param {object[]} candidates
+   * @param {string} guildId
+   * @param {object} lastTrack
+   * @param {import("lavalink-client").Player} player
+   * @returns {object|null}
    */
   pickBestCandidate(candidates, guildId, lastTrack, player) {
-    if (!candidates || candidates.length === 0) return null;
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
 
     const currentId = lastTrack?.info?.identifier;
     const currentNorm = this.normalizeTitle(lastTrack?.info?.title);
-    const queueIds = new Set(player?.queue?.tracks?.map((t) => t.info?.identifier) || []);
+    const queueIds = new Set(
+      (player?.queue?.tracks || []).map((t) => t?.info?.identifier).filter(Boolean)
+    );
+    const seen = new Set();
 
+    const usable = (info) => {
+      if (!info?.identifier) return false;
+      if (seen.has(info.identifier)) return false;
+      seen.add(info.identifier);
+      if (info.identifier === currentId) return false;
+
+      const duration = Number(info.duration) || 0;
+      if (info.isStream) return false;
+      if (duration < MIN_TRACK_MS || duration > MAX_TRACK_MS) return false;
+
+      if (queueIds.has(info.identifier)) return false;
+      if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) return false;
+      return true;
+    };
+
+    // Strict pass: same song family, so `related` results that are the identical
+    // song (different upload) are rejected.
     for (const track of candidates) {
-      const id = track?.info?.identifier;
-      if (!id) continue;
+      const info = track?.info;
+      if (!usable(info)) continue;
 
-      // 1. Skip exact identifier match
-      if (id === currentId) continue;
-
-      // 2. Skip cross-platform exact title matches
-      const candNorm = this.normalizeTitle(track.info?.title);
+      const candNorm = this.normalizeTitle(info.title);
       if (candNorm && currentNorm) {
         if (candNorm === currentNorm || candNorm.startsWith(currentNorm) || currentNorm.startsWith(candNorm)) {
           continue;
         }
       }
-
-      // 3. Skip if already queued
-      if (queueIds.has(id)) continue;
-
-      // 4. Skip if in recent guild history (prevents repetitive loop)
-      if (this.isAlreadyPlayed(guildId, id, track.info?.title)) continue;
-
-      // 5. Skip live streams or excessively long podcasts (> 15 minutes) for seamless music flow
-      if (track.info?.isStream || (track.info?.duration && track.info?.duration > 900000)) {
-        continue;
-      }
-
       return track;
     }
 
-    // Relaxed fallback: pick the first track that is not identical to current
-    const relaxed = candidates.find((t) => {
-      const candNorm = this.normalizeTitle(t.info?.title);
-      return t.info?.identifier !== currentId && candNorm !== currentNorm;
-    });
+    // Relaxed pass: title matching already ran out, keep only the hard guards
+    // (duration, duplicates, history) so autoplay still advances.
+    for (const track of candidates) {
+      const info = track?.info;
+      if (!info?.identifier) continue;
+      if (info.identifier === currentId || queueIds.has(info.identifier)) continue;
+      if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) continue;
 
-    return relaxed || candidates[0] || null;
+      const duration = Number(info.duration) || 0;
+      if (info.isStream || duration < MIN_TRACK_MS || duration > MAX_TRACK_MS) continue;
+      return track;
+    }
+
+    return null;
   }
 
   /**
-   * Query the best recommended track matching the last played track
+   * player.search with a hard timeout, so a slow/dead node can never stall the
+   * queue hand-off.
+   */
+  async searchWithTimeout(player, query) {
+    let timer;
+    try {
+      const searchPromise = player.search({ query }, player.queue?.current?.requester || null);
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Autoplay lookup timed out after ${RESOLVE_TIMEOUT_MS}ms`)), RESOLVE_TIMEOUT_MS);
+        if (timer.unref) timer.unref();
+      });
+      const res = await Promise.race([searchPromise, timeoutPromise]);
+      return res?.tracks || [];
+    } catch (err) {
+      logger.debug(`[Autoplay] Search "${query}" failed: ${err?.message || err}`);
+      return [];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Resolve the next recommendation for a seed track.
+   *
+   * Stage 1: platform radio (YouTube Mix on the seed id) - Jockie/Eara behaviour.
+   * Stage 2: related music search, run in parallel variants and merged.
+   *
+   * @returns {Promise<object|null>} stamped track ready to enqueue
    */
   async resolveRecommendation(player, lastTrack) {
-    if (!lastTrack || !player) return null;
+    if (!player || typeof player.search !== "function" || !lastTrack?.info) return null;
 
     const guildId = player.guildId;
-    const source = (lastTrack.info?.sourceName || "").toLowerCase();
-    const cleanTitle = cleanTrackTitle(lastTrack.info?.title || "");
-    const author = lastTrack.info?.author || "";
-    const searchFn = (query) => (player.search ? player.search({ query }) : player.node?.search({ query }));
+    const title = cleanTrackTitle(lastTrack.info.title || "");
+    const author = lastTrack.info.author || "";
+    const source = String(lastTrack.info.sourceName || "").toLowerCase();
 
-    if (!searchFn) return null;
-
-    let candidateTrack = null;
-
-    // -------------------------------------------------------------------------
-    // Method 1: YouTube Mix Radio Algorithm (list=RD<id>)
-    // -------------------------------------------------------------------------
+    // ---- Stage 1: seed radio -------------------------------------------------
     try {
-      let youtubeId = null;
-
-      if (source === "youtube" && lastTrack.info?.identifier) {
-        youtubeId = lastTrack.info.identifier;
-      } else {
-        // Resolve Spotify / SoundCloud / JioSaavn track to its YouTube Music ID
-        const ytmSearch = await searchFn(`ytmsearch:${cleanTitle} ${author}`);
-        if (ytmSearch && ytmSearch.tracks && ytmSearch.tracks.length > 0) {
-          youtubeId = ytmSearch.tracks[0].info?.identifier;
-        } else {
-          const ytSearch = await searchFn(`ytsearch:${cleanTitle} ${author}`);
-          if (ytSearch && ytSearch.tracks && ytSearch.tracks.length > 0) {
-            youtubeId = ytSearch.tracks[0].info?.identifier;
-          }
-        }
+      let seedId = null;
+      if (source === "youtube" && lastTrack.info.identifier) {
+        seedId = lastTrack.info.identifier;
+      } else if (title) {
+        const lookup = await this.searchWithTimeout(player, `ytmsearch:${title} ${author}`.trim());
+        seedId = lookup.find((t) => t?.info?.identifier)?.info?.identifier || null;
       }
 
-      if (youtubeId) {
-        const rdUrl = `https://www.youtube.com/watch?v=${youtubeId}&list=RD${youtubeId}`;
-        const rdRes = await searchFn(rdUrl);
-
-        if (rdRes && rdRes.tracks && rdRes.tracks.length > 0) {
-          candidateTrack = this.pickBestCandidate(rdRes.tracks, guildId, lastTrack, player);
-          if (candidateTrack) {
-            logger.debug(`[Jockie Autoplay] Resolved via YouTube RD Mix: "${candidateTrack.info.title}"`);
-          }
+      if (seedId) {
+        const radio = await this.searchWithTimeout(
+          player,
+          `https://www.youtube.com/watch?v=${seedId}&list=RD${seedId}`
+        );
+        const picked = this.pickBestCandidate(radio, guildId, lastTrack, player);
+        if (picked) {
+          logger.debug(`[Autoplay] Resolved via seed radio: "${picked.info.title}"`);
+          return this.stampTrack(picked, lastTrack, player);
         }
       }
     } catch (err) {
-      logger.debug("YouTube RD Mix query warning:", err.message);
+      logger.debug(`[Autoplay] Seed radio stage failed: ${err?.message || err}`);
     }
 
-    // -------------------------------------------------------------------------
-    // Method 2: Spotify Acoustic Search
-    // -------------------------------------------------------------------------
-    if (!candidateTrack) {
-      try {
-        const spRes = await searchFn(`spsearch:${cleanTitle} ${author}`);
-        if (spRes && spRes.tracks && spRes.tracks.length > 0) {
-          candidateTrack = this.pickBestCandidate(spRes.tracks, guildId, lastTrack, player);
-          if (candidateTrack) {
-            logger.debug(`[Jockie Autoplay] Resolved via Spotify: "${candidateTrack.info.title}"`);
-          }
-        }
-      } catch (err) {
-        logger.debug("Spotify search warning:", err.message);
-      }
+    // ---- Stage 2: related searches (parallel, merged) ------------------------
+    if (!title) return null;
+
+    const [musicRes, plainRes] = await Promise.allSettled([
+      this.searchWithTimeout(player, `ytmsearch:${title} ${author} mix`.trim()),
+      this.searchWithTimeout(player, `ytsearch:${title} ${author} song`.trim()),
+    ]);
+
+    const merged = [
+      ...(musicRes.status === "fulfilled" ? musicRes.value : []),
+      ...(plainRes.status === "fulfilled" ? plainRes.value : []),
+    ];
+
+    const picked = this.pickBestCandidate(merged, guildId, lastTrack, player);
+    if (picked) {
+      logger.debug(`[Autoplay] Resolved via related search: "${picked.info.title}"`);
+      return this.stampTrack(picked, lastTrack, player);
     }
 
-    // -------------------------------------------------------------------------
-    // Method 3: YouTube Music Related Search
-    // -------------------------------------------------------------------------
-    if (!candidateTrack) {
-      try {
-        const ytmRes = await searchFn(`ytmsearch:${author} related songs`);
-        if (ytmRes && ytmRes.tracks && ytmRes.tracks.length > 0) {
-          candidateTrack = this.pickBestCandidate(ytmRes.tracks, guildId, lastTrack, player);
-          if (candidateTrack) {
-            logger.debug(`[Jockie Autoplay] Resolved via YTM: "${candidateTrack.info.title}"`);
-          }
-        }
-      } catch (err) {
-        logger.debug("YTM related search warning:", err.message);
-      }
-    }
-
-    // -------------------------------------------------------------------------
-    // Method 4: YouTube General Search Fallback
-    // -------------------------------------------------------------------------
-    if (!candidateTrack) {
-      try {
-        const ytRes = await searchFn(`ytsearch:${cleanTitle} audio`);
-        if (ytRes && ytRes.tracks && ytRes.tracks.length > 0) {
-          candidateTrack = this.pickBestCandidate(ytRes.tracks, guildId, lastTrack, player);
-        }
-      } catch (err) {
-        logger.debug("General YouTube fallback warning:", err.message);
-      }
-    }
-
-    if (!candidateTrack) return null;
-
-    // Stamp with Jockie-style attribution
-    candidateTrack.requester = {
-      id: player.client?.user?.id || "autoplay",
-      username: "Autoplay AI",
-      bot: true,
-      displayAvatarURL: () => player.client?.user?.displayAvatarURL?.() || undefined,
-    };
-    candidateTrack.isAutoplay = true;
-    candidateTrack.seedTitle = lastTrack.info?.title || "Music";
-
-    return candidateTrack;
+    return null;
   }
 
   /**
-   * Pre-fetch next autoplay track in the background for 0ms gapless transition
+   * Mark a resolved track as an autoplay pick with full attribution.
+   */
+  stampTrack(track, lastTrack, player) {
+    const clientUserId =
+      player?.lavalink?.client?.user?.id || player?.client?.user?.id || "autoplay";
+
+    track.requester = {
+      id: clientUserId,
+      username: "Autoplay",
+      bot: true,
+      displayAvatarURL: () => player?.lavalink?.client?.user?.displayAvatarURL?.() || undefined,
+    };
+    track.isAutoplay = true;
+    track.seedTitle = lastTrack?.info?.title || "Music";
+    return track;
+  }
+
+  /**
+   * Resolve the next recommendation while the current track is still playing, so
+   * the hand-off at the end of the track is gapless.
+   *
+   * @returns {Promise<object|null>} cached recommendation
    */
   async prefetchAutoplay(player, currentTrack) {
-    const isAutoplay = player.get("autoplay") ?? true;
-    if (!isAutoplay || player.get("isAutoplayPrefetching")) return;
-    player.set("isAutoplayPrefetching", true);
+    if (!player || !currentTrack) return null;
+    if (!Boolean(player.get("autoplay"))) return null;
+    if (player.get("isAutoplayPrefetching")) return null;
 
+    player.set("isAutoplayPrefetching", true);
     try {
       const recommendation = await this.resolveRecommendation(player, currentTrack);
       if (recommendation) {
         player.set("prefetchedAutoplayTrack", recommendation);
-        logger.debug(`[Jockie Autoplay] Pre-buffered: "${recommendation.info.title}" (Seed: "${currentTrack.info.title}")`);
+        logger.debug(
+          `[Autoplay] Pre-buffered: "${recommendation.info.title}" (seed: "${currentTrack.info.title}")`
+        );
       }
+      return recommendation;
     } catch (err) {
-      logger.debug("Autoplay prefetch warning:", err.message);
+      logger.debug(`[Autoplay] Prefetch failed in guild ${player.guildId}: ${err?.message || err}`);
+      return null;
     } finally {
       player.set("isAutoplayPrefetching", false);
     }
   }
 
   /**
-   * Main Autoplay Execution
-   * @param {import("lavalink-client").Player} player 
-   * @param {import("lavalink-client").Track} lastTrack 
-   * @param {boolean} isAutoPlayHook - True when called by lavalink-client onEmptyQueue.autoPlayFunction
+   * Single entry point used by the manager's onEmptyQueue hook, the /autoplay
+   * command and the control panel button.
+   *
+   * Adds exactly one track to the queue. In hook mode the client starts it; in
+   * manual mode this method starts playback itself when the player is idle.
+   *
+   * @param {import("lavalink-client").Player} player
+   * @param {object|null} lastTrack seed track
+   * @param {boolean} isAutoPlayHook true when invoked from lavalink-client
+   * @returns {Promise<boolean>} whether a track was queued
    */
   async executeAutoplay(player, lastTrack, isAutoPlayHook = false) {
-    const isAutoplay = Boolean(player.get("autoplay"));
-    if (!player || !isAutoplay) return false;
+    if (!player) return false;
+    if (!Boolean(player.get("autoplay"))) return false;
+    if (player._autoplayRunning) return false;
 
-    // Use pre-fetched track if available (0ms lookup delay)
-    let nextTrack = player.get("prefetchedAutoplayTrack");
-    player.set("prefetchedAutoplayTrack", null);
-
-    if (!lastTrack) {
-      lastTrack = player.queue.previous[0] || player.queue.current || player.get("lastPlayedTrack");
-    }
-
-    if (!nextTrack && lastTrack) {
-      nextTrack = await this.resolveRecommendation(player, lastTrack);
-    }
-
-    if (!nextTrack) {
-      logger.warn(`[Jockie Autoplay] Could not resolve recommendation for guild ${player.guildId}.`);
-      return false;
-    }
-
-    // Record in history buffer to prevent repeats
-    this.recordTrackPlayed(player.guildId, nextTrack.info?.identifier, nextTrack.info?.title);
-
-    // Enqueue
-    player.queue.add(nextTrack);
-    logger.info(`[Jockie Autoplay] Autoplaying "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId}`);
-
-    const voiceStatusManager = require("./voiceStatusManager");
-    if (player.voiceChannelId && nextTrack) {
-      voiceStatusManager.onTrackStart(player.lavalink?.client, player, nextTrack);
-    }
-
-    // If NOT called inside lavalink-client's internal autoPlayFunction hook, trigger playback manually
-    if (!isAutoPlayHook) {
-      if (!player.playing) {
-        try {
-          await player.play();
-        } catch (err) {
-          logger.error(`[Jockie Autoplay] Failed to play track for guild ${player.guildId}:`, err?.message || err);
-          return false;
-        }
+    player._autoplayRunning = true;
+    try {
+      const seed = lastTrack || player.queue?.previous?.[0] || player.get("lastPlayedTrack");
+      if (!seed?.info) {
+        logger.warn(`[Autoplay] No seed track available for guild ${player.guildId}.`);
+        return false;
       }
-    }
 
-    return true;
+      let nextTrack = player.get("prefetchedAutoplayTrack") || null;
+      player.set("prefetchedAutoplayTrack", null);
+
+      // Drop a stale prefetch that was resolved for a different seed
+      if (nextTrack && nextTrack.info?.identifier === seed.info?.identifier) nextTrack = null;
+
+      if (!nextTrack) {
+        nextTrack = await this.resolveRecommendation(player, seed);
+      }
+
+      if (!nextTrack) {
+        logger.warn(`[Autoplay] Could not resolve a recommendation for guild ${player.guildId}.`);
+        return false;
+      }
+
+      this.recordTrackPlayed(player.guildId, nextTrack.info?.identifier, nextTrack.info?.title);
+      player.queue.add(nextTrack);
+      player.set("autoplayHandledAt", Date.now());
+      logger.info(
+        `[Autoplay] Queued "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId} (seed: "${seed.info.title}")`
+      );
+
+      const voiceStatusManager = require("./voiceStatusManager");
+      voiceStatusManager.onTrackStart(player.lavalink?.client, player, nextTrack);
+
+      // Pre-resolve the *following* track now so the next hand-off is instant.
+      this.prefetchAutoplay(player, nextTrack).catch(() => {});
+
+      if (!isAutoPlayHook && !player.playing && !player.queue.current) {
+        await player.play();
+      }
+
+      return true;
+    } catch (err) {
+      logger.warn(`[Autoplay] Failed in guild ${player.guildId}: ${err?.message || err}`);
+      return false;
+    } finally {
+      player._autoplayRunning = false;
+    }
   }
 }
 

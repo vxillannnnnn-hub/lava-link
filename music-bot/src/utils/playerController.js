@@ -23,6 +23,8 @@ const db = require("../database/db");
 const emojis = require("./emojis");
 const voiceStatusManager = require("./voiceStatusManager");
 const logger = require("./logger");
+const volumeManager = require("./volumeManager");
+const playerActions = require("./playerActions");
 
 /**
  * Build Ultra-Compact Landscape Embed (Eara / Jockie Style Fallback)
@@ -170,7 +172,9 @@ function buildControlDrawerPayload(player) {
       .setStyle(ButtonStyle.Secondary)
   );
 
-  // Row 2 (4 items): Volume Presets & Queue
+  // Row 2 (4 items): Clipping-safe volume presets & Queue
+  // Digital gain above 100% multiplies PCM and saturates the Opus encoder, so
+  // every preset here stays inside the clipping-free range (see volumeManager).
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("ctrl_vol_50")
@@ -178,14 +182,14 @@ function buildControlDrawerPayload(player) {
       .setLabel(player.volume === 50 ? "[50%]" : "50%")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("ctrl_vol_100")
+      .setCustomId("ctrl_vol_75")
       .setEmoji(emojis.volumeNormal)
-      .setLabel(player.volume === 100 ? "[100%]" : "100%")
+      .setLabel(player.volume === 75 ? "[75%]" : "75%")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("ctrl_vol_150")
+      .setCustomId("ctrl_vol_100")
       .setEmoji(emojis.volumeBoost)
-      .setLabel(player.volume === 150 ? "[150%]" : "150%")
+      .setLabel(player.volume === 100 ? "[100%]" : "100%")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId("ctrl_queue")
@@ -615,7 +619,7 @@ async function handlePlayerButton(interaction, client) {
       } else if (!player.get("autoplay")) {
         voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
       }
-      await player.skip();
+      await playerActions.skipCurrent(player, 0);
       await interaction.reply({
         content: `${emojis.skip} Skipped **${truncate(currentTitle, 45)}**`,
         flags: MessageFlags.Ephemeral,
@@ -741,7 +745,7 @@ async function handlePlayerButton(interaction, client) {
         if (!player.playing && player.queue.tracks.length === 0) {
           await autoplayManager.executeAutoplay(player, seedTrack, false);
         } else {
-          autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack);
         }
       }
 
@@ -847,18 +851,29 @@ async function handlePlayerButton(interaction, client) {
 
     case "ctrl_vol_50": {
       if (!checkDJ(false)) return;
-      await player.setVolume(50);
+      await volumeManager.applyVolume(player, 50);
+      return await interaction.update(buildControlDrawerPayload(player));
+    }
+    case "ctrl_vol_75": {
+      if (!checkDJ(false)) return;
+      await volumeManager.applyVolume(player, 75);
       return await interaction.update(buildControlDrawerPayload(player));
     }
     case "ctrl_vol_100": {
       if (!checkDJ(false)) return;
-      await player.setVolume(100);
+      await volumeManager.applyVolume(player, 100);
       return await interaction.update(buildControlDrawerPayload(player));
     }
     case "ctrl_vol_150": {
+      // Legacy button id from dashboards posted before the clipping-safe gain path
       if (!checkDJ(false)) return;
-      await player.setVolume(150);
-      return await interaction.update(buildControlDrawerPayload(player));
+      const legacyResult = await volumeManager.applyVolume(player, 150);
+      await interaction.update(buildControlDrawerPayload(player));
+      return interaction.followUp({
+        content: `${emojis.volumeNormal} ${volumeManager.capNotice(legacyResult)}`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
     }
 
     case "btn_loop": {
@@ -904,7 +919,7 @@ async function handlePlayerButton(interaction, client) {
           // If queue ended already, immediately start autoplaying!
           await autoplayManager.executeAutoplay(player, seedTrack, false);
         } else {
-          autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack);
         }
       }
 
@@ -960,7 +975,7 @@ async function handlePlayerButton(interaction, client) {
       player.queue.tracks.splice(0, player.queue.tracks.length);
       const vcId = player.voiceChannelId;
       if (player.get("247")) {
-        await player.stop().catch(() => {});
+        await playerActions.stopPlayback(player, { clearQueue: true, executeAutoplay: false });
         voiceStatusManager.setIdleVoiceStatus(client, vcId, player.guildId);
         await interaction.reply({
           content: `${emojis.stop} Playback stopped and queue cleared (24/7 Mode Active).`,
@@ -978,30 +993,40 @@ async function handlePlayerButton(interaction, client) {
       break;
     }
 
-    // Quick Console Handlers
+    // Quick Console Handlers (all volume writes go through the clipping-safe path)
     case "pctrl_vol_50": {
       if (!checkDJ(false)) return;
-      await player.setVolume(50);
+      const v50 = await volumeManager.applyVolume(player, 50);
       return interaction.reply({
-        content: `${emojis.volumeLow} Volume set to **50%**.`,
+        content: `${emojis.volumeLow} ${volumeManager.describe(v50)}`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+    case "pctrl_vol_75": {
+      if (!checkDJ(false)) return;
+      const v75 = await volumeManager.applyVolume(player, 75);
+      return interaction.reply({
+        content: `${emojis.volumeNormal} ${volumeManager.describe(v75)}`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
     }
     case "pctrl_vol_100": {
       if (!checkDJ(false)) return;
-      await player.setVolume(100);
+      const v100 = await volumeManager.applyVolume(player, 100);
       return interaction.reply({
-        content: `${emojis.volumeNormal} Volume set to **100% (Lossless Direct Passthrough)**.`,
+        content: `${emojis.volumeNormal} ${volumeManager.describe(v100)}`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
     }
     case "pctrl_vol_150": {
+      // Legacy preset: applied as a capped, clipping-safe request
       if (!checkDJ(false)) return;
-      await player.setVolume(150);
+      const v150 = await volumeManager.applyVolume(player, 150);
       return interaction.reply({
-        content: `${emojis.volumeBoost} Volume boosted to **150%**.`,
+        content: `${emojis.volumeNormal} ${volumeManager.describe(v150)}`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });

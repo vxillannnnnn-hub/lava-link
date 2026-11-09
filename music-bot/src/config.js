@@ -30,14 +30,30 @@ module.exports = {
     defaultAutoplay: process.env.DEFAULT_AUTOPLAY === "true" || false, // Starts off by default, turns on with button or command
     applyVolumeAsFilter: false, // NEVER decode to PCM if volume is 100
     autoMaximizeBitrate: process.env.AUTO_MAXIMIZE_BITRATE !== "false", // Automatically maximizes voice channel to 384kbps if permitted
-    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "spsearch", // spsearch, ytsearch, ytmsearch, scsearch, jssearch
+    // YouTube Music serves Opus natively, so Lavaplayer forwards packets without
+    // decoding/re-encoding. That is the highest fidelity path Discord can accept.
+    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "ytmsearch", // ytmsearch, ytsearch, scsearch, spsearch, jssearch
     maxPreviousTracks: 25,
     inactivityTimeoutMs: parseInt(process.env.INACTIVITY_TIMEOUT_MS || "180000", 10), // 3 minutes
     emptyChannelTimeoutMs: parseInt(process.env.EMPTY_CHANNEL_TIMEOUT_MS || "120000", 10), // 2 minutes
     autoReconnect: true,
     gaplessPreload: true, // Pre-resolve next track/autoplay recommendation in background
+    minAutoPlayMs: parseInt(process.env.MIN_AUTOPLAY_MS || "5000", 10), // anti-spam guard between autoplay hand-offs
+    autoplayTimeoutMs: parseInt(process.env.AUTOPLAY_TIMEOUT_MS || "7000", 10), // hard cap per recommendation lookup
     autocompleteCacheTtlMs: 300000, // 5-minute memory cache for instant <1ms autocomplete
     useComponentsV2: process.env.USE_COMPONENTS_V2 !== "false", // Native Discord Components V2 Container (Flags: 32768)
+
+    // Audio Fidelity Guard (see utils/audioQuality.js)
+    quality: {
+      // Play Opus-native sources as-is; only metadata-only providers are re-resolved.
+      preferOpusNativeSources: process.env.PREFER_OPUS_NATIVE !== "false",
+      // Re-resolve every Spotify/Deezer/Apple/Tidal/JioSaavn track to a full-length
+      // Opus source (best quality, costs one extra search per track).
+      upgradeMetadataOnlySources: process.env.UPGRADE_METADATA_SOURCES === "true",
+      metadataOnlySources: ["spotify", "deezer", "applemusic", "tidal", "jiosaavn", "yandexmusic", "flowery-tts"],
+      previewMaxDurationMs: parseInt(process.env.PREVIEW_MAX_DURATION_MS || "31000", 10), // anything <= 31s is a preview
+      upgradeTimeoutMs: parseInt(process.env.UPGRADE_TIMEOUT_MS || "4000", 10), // never add more than 4s of start latency
+    },
   },
 
   // Real-Time Voice Channel Status (VC Status) Engine (No Emojis)

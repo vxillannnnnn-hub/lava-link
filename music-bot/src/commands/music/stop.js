@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require("discord.js");
 const { actionText, errorText } = require("../../utils/responses");
 const emojis = require("../../utils/emojis");
 const djManager = require("../../utils/djManager");
+const playerActions = require("../../utils/playerActions");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,7 +24,9 @@ module.exports = {
     player.queue.tracks.splice(0, player.queue.tracks.length);
 
     if (player.get("247")) {
-      await player.stop().catch(() => {});
+      // lavalink-client v2 has no stop() - stopPlaying() keeps the player and
+      // the voice connection alive for 24/7 mode.
+      await playerActions.stopPlayback(player, { clearQueue: true, executeAutoplay: false });
       const voiceStatusManager = require("../../utils/voiceStatusManager");
       voiceStatusManager.setIdleVoiceStatus(client, vcId, interaction.guildId);
       return interaction.reply(
