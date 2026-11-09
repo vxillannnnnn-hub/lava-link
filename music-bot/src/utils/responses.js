@@ -11,6 +11,19 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const emojis = require("./emojis");
 
+/**
+ * Every text payload suppresses Discord's automatic link unfurling. Our copy
+ * frequently embeds track URLs and masked links, and those unfurl into large
+ * preview cards that make the channel look noisy. SuppressEmbeds only blocks
+ * auto-generated previews; buttons, components and explicit embeds sent by
+ * other builders are unaffected.
+ */
+const SUPPRESS = MessageFlags.SuppressEmbeds;
+
+function textFlags(options = {}) {
+  return options.ephemeral ? SUPPRESS | MessageFlags.Ephemeral : SUPPRESS;
+}
+
 module.exports = {
   /**
    * Operational Action Text with optional native subtext
@@ -22,8 +35,8 @@ module.exports = {
     const payload = {
       content: out,
       allowedMentions: { parse: [], users: [] },
+      flags: textFlags(options),
     };
-    if (options.ephemeral) payload.flags = MessageFlags.Ephemeral;
     return payload;
   },
 
@@ -53,8 +66,8 @@ module.exports = {
       content: out,
       components: [row],
       allowedMentions: { parse: [], users: [] },
+      flags: textFlags(options),
     };
-    if (options.ephemeral) payload.flags = MessageFlags.Ephemeral;
     return payload;
   },
 
@@ -85,8 +98,8 @@ module.exports = {
       content: out,
       components: [row],
       allowedMentions: { parse: [], users: [] },
+      flags: textFlags(options),
     };
-    if (options.ephemeral) payload.flags = MessageFlags.Ephemeral;
     return payload;
   },
 
@@ -98,7 +111,7 @@ module.exports = {
     if (subtext) out += `\n-# ${subtext}`;
     return {
       content: out,
-      flags: MessageFlags.Ephemeral,
+      flags: SUPPRESS | MessageFlags.Ephemeral,
       allowedMentions: { parse: [], users: [] },
     };
   },
@@ -111,7 +124,7 @@ module.exports = {
     if (subtext) out += `\n-# ${subtext}`;
     return {
       content: out,
-      flags: MessageFlags.Ephemeral,
+      flags: SUPPRESS | MessageFlags.Ephemeral,
       allowedMentions: { parse: [], users: [] },
     };
   },
@@ -125,8 +138,8 @@ module.exports = {
     const payload = {
       content: out,
       allowedMentions: { parse: [], users: [] },
+      flags: textFlags(options),
     };
-    if (options.ephemeral) payload.flags = MessageFlags.Ephemeral;
     return payload;
   },
 
@@ -139,8 +152,8 @@ module.exports = {
     const payload = {
       content: out,
       allowedMentions: { parse: [], users: [] },
+      flags: textFlags(options),
     };
-    if (options.ephemeral) payload.flags = MessageFlags.Ephemeral;
     return payload;
   },
 };

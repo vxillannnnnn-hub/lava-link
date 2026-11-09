@@ -27,6 +27,23 @@ const volumeManager = require("./volumeManager");
 const playerActions = require("./playerActions");
 
 /**
+ * Only http(s) URLs are valid for Discord buttons / embed links. Lavalink track
+ * identifiers can be non-URL values (e.g. `ytsearch:...`), and discord.js throws
+ * when those reach a Link button, so normalise first.
+ */
+function safeHttpUrl(url, fallback = "https://discord.com") {
+  if (typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+    } catch (_) {
+      // fall through
+    }
+  }
+  return fallback;
+}
+
+/**
  * Build Ultra-Compact Landscape Embed (Eara / Jockie Style Fallback)
  * Minimalist, micro-height, zero bloat, ZERO PINGS
  */
@@ -51,13 +68,10 @@ function buildNowPlayingEmbed(player) {
   // Eara Format Line 1: [Title](URI) — Artist
   const line1 = `[${cleanTitle}](${uri}) — ${cleanAuthor}`;
 
-  // Eara Format Line 2: <@Requester> · Album/Source (Zero pings enforced via allowedMentions)
-  const requesterId = track.requester?.id || (typeof track.requester === "string" && /^\d+$/.test(track.requester) ? track.requester : null);
+  // Eara Format Line 2: Requester display name · Album/Source (Zero pings, zero mentions)
   const requesterBadge = track.isAutoplay
     ? `${emojis.sparkles} \`Autoplay\` · ${truncate(track.seedTitle || albumOrSource, 25)}`
-    : requesterId
-      ? `<@${requesterId}> · ${albumOrSource}`
-      : `@${formatRequester(track.requester)} · ${albumOrSource}`;
+    : `${formatRequester(track.requester)} · ${albumOrSource}`;
 
   // Eara Format Line 3: 00:18 [progress-bar] 03:42
   const line3 = progressSlider;
@@ -684,7 +698,7 @@ async function handlePlayerButton(interaction, client) {
       db.addFavorite(interaction.user.id, track);
 
       const cleanTitle = truncate(track.info.title, 50);
-      const uri = track.info.uri || "https://discord.com";
+      const uri = safeHttpUrl(track.info.uri);
 
       const dmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -704,17 +718,18 @@ async function handlePlayerButton(interaction, client) {
         await interaction.user.send({
           content: dmContent,
           components: [dmRow],
+          flags: MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
         return interaction.reply({
           content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites & sent details to your DMs!\n-# Use \`/playlist play-favorites\` to stream anytime`,
-          flags: MessageFlags.Ephemeral,
+          flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
       } catch {
         return interaction.reply({
           content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites!\n-# Use \`/playlist play-favorites\` to stream anytime`,
-          flags: MessageFlags.Ephemeral,
+          flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
       }
@@ -803,7 +818,7 @@ async function handlePlayerButton(interaction, client) {
       db.addFavorite(interaction.user.id, track);
 
       const cleanTitle = truncate(track.info.title, 50);
-      const uri = track.info.uri || "https://discord.com";
+      const uri = safeHttpUrl(track.info.uri);
 
       const dmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -823,17 +838,18 @@ async function handlePlayerButton(interaction, client) {
         await interaction.user.send({
           content: dmContent,
           components: [dmRow],
+          flags: MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
         return interaction.reply({
           content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites & sent details to your DMs!\n-# Use \`/playlist play-favorites\` to stream anytime`,
-          flags: MessageFlags.Ephemeral,
+          flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
       } catch {
         return interaction.reply({
           content: `${emojis.heart} Saved **[${cleanTitle}](${uri})** to your Favorites!\n-# Use \`/playlist play-favorites\` to stream anytime`,
-          flags: MessageFlags.Ephemeral,
+          flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
           allowedMentions: { parse: [], users: [] },
         });
       }
@@ -852,7 +868,7 @@ async function handlePlayerButton(interaction, client) {
       }
 
       const queueItems = tracks.slice(0, 10).map((t, idx) => {
-        return `\`${idx + 1}.\` [${truncate(t.info.title, 36)}](${t.info.uri || "https://discord.com"}) — \`${formatDuration(t.info.duration)}\``;
+        return `\`${idx + 1}.\` [${truncate(t.info.title, 36)}](${safeHttpUrl(t.info.uri)}) — \`${formatDuration(t.info.duration)}\``;
       });
 
       const remaining = tracks.length > 10 ? `\n*...and ${tracks.length - 10} more tracks*` : "";
@@ -863,13 +879,13 @@ async function handlePlayerButton(interaction, client) {
 
       const queueContent =
         `${emojis.queue} **Upcoming Queue — ${tracks.length} track(s)**\n\n` +
-        `${emojis.play} **Now Playing:** [${truncate(current?.info?.title || "Nothing", 40)}](${current?.info?.uri || "https://discord.com"})\n\n` +
+        `${emojis.play} **Now Playing:** [${truncate(current?.info?.title || "Nothing", 40)}](${safeHttpUrl(current?.info?.uri)})\n\n` +
         `**Next Tracks:**\n${queueItems.length > 0 ? queueItems.join("\n") + remaining : "*No upcoming tracks in queue.*"}\n\n` +
         `-# Total Duration: \`${formatDuration(totalDuration)}\` · Autoplay: \`${player.get("autoplay") ? "ON" : "OFF"}\``;
 
       return interaction.reply({
         content: queueContent,
-        flags: MessageFlags.Ephemeral,
+        flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
         allowedMentions: { parse: [], users: [] },
       });
     }
@@ -985,7 +1001,7 @@ async function handlePlayerButton(interaction, client) {
       }
 
       const queueItems = tracks.slice(0, 10).map((t, idx) => {
-        return `\`${idx + 1}.\` [${truncate(t.info.title, 36)}](${t.info.uri || "https://discord.com"}) — \`${formatDuration(t.info.duration)}\``;
+        return `\`${idx + 1}.\` [${truncate(t.info.title, 36)}](${safeHttpUrl(t.info.uri)}) — \`${formatDuration(t.info.duration)}\``;
       });
 
       const remaining = tracks.length > 10 ? `\n*...and ${tracks.length - 10} more tracks*` : "";
@@ -996,13 +1012,13 @@ async function handlePlayerButton(interaction, client) {
 
       const queueContent =
         `${emojis.queue} **Upcoming Queue — ${tracks.length} track(s)**\n\n` +
-        `${emojis.play} **Now Playing:** [${truncate(current?.info?.title || "Nothing", 40)}](${current?.info?.uri || "https://discord.com"})\n\n` +
+        `${emojis.play} **Now Playing:** [${truncate(current?.info?.title || "Nothing", 40)}](${safeHttpUrl(current?.info?.uri)})\n\n` +
         `**Next Tracks:**\n${queueItems.length > 0 ? queueItems.join("\n") + remaining : "*No upcoming tracks in queue.*"}\n\n` +
         `-# Total Duration: \`${formatDuration(totalDuration)}\` · Autoplay: \`${player.get("autoplay") ? "ON" : "OFF"}\``;
 
       return interaction.reply({
         content: queueContent,
-        flags: MessageFlags.Ephemeral,
+        flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
         allowedMentions: { parse: [], users: [] },
       });
     }

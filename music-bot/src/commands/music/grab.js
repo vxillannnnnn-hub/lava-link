@@ -1,7 +1,20 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const { errorText, actionWithButton } = require("../../utils/responses");
 const { formatDuration, getSourceBadge, truncate } = require("../../utils/formatters");
 const emojis = require("../../utils/emojis");
+
+// Lock buttons reject non-http(s) values; normalise Lavalink identifiers first.
+function safeHttpUrl(url, fallback = "https://discord.com") {
+  if (typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+    } catch (_) {
+      // fall through
+    }
+  }
+  return fallback;
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -16,7 +29,7 @@ module.exports = {
 
     const track = player.queue.current;
     const cleanTitle = truncate(track.info.title, 60);
-    const uri = track.info.uri || "https://discord.com";
+    const uri = safeHttpUrl(track.info.uri);
 
     try {
       const dmRow = new ActionRowBuilder().addComponents(
@@ -37,6 +50,7 @@ module.exports = {
       await interaction.user.send({
         content: dmContent,
         components: [dmRow],
+        flags: MessageFlags.SuppressEmbeds,
         allowedMentions: { parse: [], users: [] },
       });
 

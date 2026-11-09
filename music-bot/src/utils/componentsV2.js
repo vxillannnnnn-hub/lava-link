@@ -84,14 +84,10 @@ function buildComponentsV2Payload(player, actionRows = []) {
   // Eara Format Line 1: [Title](URI) — Artist
   const line1 = `[${cleanTitle}](${uri}) — ${cleanAuthor}`;
 
-  // Eara Format Line 2: <@Requester> · Album/Source
-  // NOTE: Passing allowed_mentions: { parse: [], users: [] } ensures the purple mention pill renders without pinging!
-  const requesterId = track.requester?.id || (typeof track.requester === "string" && /^\d+$/.test(track.requester) ? track.requester : null);
+  // Eara Format Line 2: Requester display name · Album/Source (Zero pings, zero mentions)
   const requesterBadge = track.isAutoplay
     ? `${emojis.sparkles} \`Autoplay\` · ${truncate(track.seedTitle || albumOrSource, 25)}`
-    : requesterId
-      ? `<@${requesterId}> · ${albumOrSource}`
-      : `@${formatRequester(track.requester)} · ${albumOrSource}`;
+    : `${formatRequester(track.requester)} · ${albumOrSource}`;
 
   // Eara Format Line 3: 00:18 [progress-bar] 03:42
   const line3 = progressSlider;

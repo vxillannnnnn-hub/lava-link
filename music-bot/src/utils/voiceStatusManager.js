@@ -236,8 +236,12 @@ async function setChannelStatus(client, voiceChannelId, statusText, isPriority =
     pendingUpdateTimers.delete(voiceChannelId);
   }
 
-  // If in rate-limit cooldown, queue to fire automatically when cooldown expires
-  if (elapsed < MIN_UPDATE_COOLDOWN_MS) {
+  // Priority updates (new track / resume / pause) must be applied immediately and
+  // must never sit in the cooldown queue - queued priority writes made VC status
+  // changes feel laggy.
+  if (isPriority || elapsed >= MIN_UPDATE_COOLDOWN_MS) {
+    lastUpdateTimes.set(voiceChannelId, now);
+  } else {
     const delay = Math.max(50, MIN_UPDATE_COOLDOWN_MS - elapsed + 20);
     const timer = setTimeout(async () => {
       pendingUpdateTimers.delete(voiceChannelId);
@@ -247,8 +251,6 @@ async function setChannelStatus(client, voiceChannelId, statusText, isPriority =
     pendingUpdateTimers.set(voiceChannelId, timer);
     return true;
   }
-
-  lastUpdateTimes.set(voiceChannelId, now);
 
   try {
     if (!client.rest) return false;

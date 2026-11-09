@@ -161,7 +161,7 @@ module.exports = {
       );
 
       descriptionLines.push(
-        `\`${index + 1}.\` ${cleanTitle}) - \`${cleanAuthor}\` (\`${duration}\`)`
+        `\`${index + 1}.\` ${cleanTitle} - \`${cleanAuthor}\` (\`${duration}\`)`
       );
     });
 
@@ -292,12 +292,14 @@ module.exports = {
       content: `${emojis.check} Selected and enqueued [**${cleanTitle}**](${uri}) by **${cleanAuthor}**!`,
       embeds: [],
       components: [],
+      flags: MessageFlags.SuppressEmbeds,
       allowedMentions: { parse: [], users: [] },
     });
 
     if (interaction.channel) {
       await interaction.channel.send({
-        content: `${emojis.check} Enqueued [**${cleanTitle}**](${uri}) by **${cleanAuthor}** (\`#${pos}\`).\n-# Requested by <@${interaction.user.id}>`,
+        content: `${emojis.check} Enqueued [**${cleanTitle}**](${uri}) by **${cleanAuthor}** (\`#${pos}\`).\n-# Requested by **${truncate(interaction.user.username, 20)}**`,
+        flags: MessageFlags.SuppressEmbeds,
         allowedMentions: { parse: [], users: [] },
       }).catch(() => {});
     }

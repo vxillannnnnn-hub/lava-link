@@ -24,7 +24,7 @@ The file [`NODE_STATUS.md`](NODE_STATUS.md) is updated in real time whenever a G
 
 ## 🌟 Features
 
-- **🚀 Plug & Play GitHub Actions Runner**: Boots Lavalink v4.2.2 with Java 21 LTS in a clean Ubuntu runner.
+- **🚀 Plug & Play GitHub Actions Runner**: Boots Lavalink 4.2.2 with Java 25 LTS in a clean Ubuntu runner, using the koe 3.1.0 build from PR #1235 to fix the DAVE send-path crackle ([issue #1222](https://github.com/lavalink-devs/Lavalink/issues/1222)).
 - **🌐 Public Access via Cloudflare Tunnel**:
   - **Quick Tunnel (Free & Instant)**: Automatically generates a public HTTPS / WSS endpoint (`https://*.trycloudflare.com`) with zero configuration.
   - **Named Tunnel (Fixed Custom Domain)**: Use a Cloudflare Tunnel token to route traffic to a permanent domain (e.g., `lavalink.yourdomain.com`).

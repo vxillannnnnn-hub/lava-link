@@ -19,6 +19,9 @@ const DAVE_MIN_VERSION = [4, 2, 0];
 // https://github.com/lavalink-devs/Lavalink/issues/1222
 const KNOWN_STALL_VERSION = "4.2.2";
 const STALL_ISSUE_URL = "https://github.com/lavalink-devs/Lavalink/issues/1222";
+// Builds containing koe 3.1.0 (Lavalink PR #1235) keep the 4.2.2 base version
+// but already have the send-path fix. The deployment pins this commit.
+const PATCHED_BUILD_COMMITS = ["f733576"];
 
 function parseSemver(value) {
   const match = String(value || "").match(/(\d+)\.(\d+)\.(\d+)/);
@@ -62,9 +65,17 @@ async function runAudioSelfCheck(client, node) {
       `Node runs Lavalink ${version}; DAVE (mandatory Discord voice encryption since March 2026) needs 4.2.0+. Audio will fail or arrive distorted.`
     );
   } else if (String(version).startsWith(KNOWN_STALL_VERSION)) {
-    warnings.push(
-      `Node runs Lavalink ${version}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, Lavalink issue #1222). This is the latest stable release as of 2026-11; the stall is tracked upstream at ${STALL_ISSUE_URL}.`
-    );
+    const commit = String(info?.git?.commit || "").toLowerCase();
+    const isPatchedBuild = PATCHED_BUILD_COMMITS.some((c) => commit.startsWith(c));
+    if (isPatchedBuild) {
+      notes.push(
+        `Lavalink ${version} (commit ${commit.slice(0, 7)}, JVM ${info?.jvm || "?"}) is the koe 3.1.0 build - the #1222 DAVE send-path fix is active`
+      );
+    } else {
+      warnings.push(
+        `Node runs Lavalink ${version}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, Lavalink issue #1222). This is the latest stable release as of 2026-11; the stall is tracked upstream at ${STALL_ISSUE_URL}.`
+      );
+    }
   } else {
     notes.push(`Lavalink ${version} supports DAVE`);
   }

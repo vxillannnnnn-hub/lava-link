@@ -50,29 +50,40 @@ jobs:
       # ========================================================================
       # MATRIX COMPONENT A: LAVALINK AUDIO NODE
       # ========================================================================
-      - name: Setup Java 21 LTS (Lavalink)
+      - name: Setup Java 25 LTS (Lavalink)
         if: matrix.component == 'lavalink'
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '25'
 
-      - name: Cache Lavalink Core Jar
+      - name: Restore Lavalink Jar (koe 3.1.0 build)
         if: matrix.component == 'lavalink'
         id: cache-lavalink
         uses: actions/cache@v5
         with:
           path: Lavalink.jar
-          key: lavalink-v4.2.2-jar
+          key: lavalink-pr1235-koe310-jar-v1
 
-      - name: Download Lavalink v4.2.2 Jar (if not cached)
+      # PR #1235 (koe 3.0.0 -> 3.1.0, libdave 0.2.0) is not in a release yet.
+      # It serializes DAVE encryption under the session write lock (the libdave
+      # encryptor is not reentrant) and binds the DAVE manager to the active
+      # gateway connection, which fixes the 100-400ms send-path stalls tracked
+      # in lavalink-devs/Lavalink#1222 (heard as constant crackle/jitter).
+      # The jar is extracted from the PR author's published image; the image
+      # itself is Java 17, we only take the jar and run it on Java 25 below.
+      - name: Download Lavalink PR #1235 Jar (if not cached)
         if: matrix.component == 'lavalink' && steps.cache-lavalink.outputs.cache-hit != 'true'
         run: |
-          if [ ! -f "Lavalink.jar" ] || [ $(wc -c < "Lavalink.jar" 2>/dev/null || echo 0) -lt 10000000 ]; then
-            echo "Fetching Lavalink v4.2.2..."
-            curl -sLo Lavalink.jar https://github.com/lavalink-devs/Lavalink/releases/download/4.2.2/Lavalink.jar
-          fi
+          IMAGE="ghcr.io/alula/lavalink@sha256:dbe451c2602376adb7d42ad25c24aaaeb800240b9e78ecb8c405a6f51a68d9bf"
+          echo "Pulling $IMAGE ..."
+          docker pull "$IMAGE"
+          docker rm -f lavalink-extract 2>/dev/null || true
+          docker create --name lavalink-extract "$IMAGE"
+          docker cp lavalink-extract:/opt/Lavalink/Lavalink.jar ./Lavalink.jar
+          docker rm lavalink-extract
           ls -lh Lavalink.jar
+          test "$(wc -c < Lavalink.jar)" -gt 10000000 || { echo "::error::Extracted Lavalink.jar looks invalid"; exit 1; }
 
       - name: Configure application.yml
         if: matrix.component == 'lavalink'
@@ -179,12 +190,13 @@ jobs:
             exit 1
           fi
 
-      - name: Start Lavalink Node (Java 21 Generational ZGC Ultra-Low Latency)
+      - name: Start Lavalink Node (Java 25 + koe 3.1.0 DAVE send-path fix)
         if: matrix.component == 'lavalink'
         run: |
           nohup java \
+            --enable-native-access=ALL-UNNAMED \
+            --sun-misc-unsafe-memory-access=allow \
             -XX:+UseZGC \
-            -XX:+ZGenerational \
             -Xms1G \
             -Xmx2G \
             -XX:+AlwaysPreTouch \
@@ -313,8 +325,8 @@ jobs:
           | **Password** | `${{ env.NODE_PASSWORD }}` |
           | **REST Endpoint** | `${{ env.PUBLIC_URL }}` |
           | **WebSocket Endpoint** | `wss://${{ env.PUBLIC_HOST }}:443/v4/websocket` |
-          | **GC Engine** | `Java 21 Generational ZGC (<1ms)` |
-          | **Voice Transport** | `Netty Native C-Epoll` |
+          | **GC Engine** | `Java 25 Generational ZGC (<1ms)` |
+          | **Voice Transport** | `Netty Native C-Epoll + koe 3.1.0 DAVE fix` |
           | **Session #** | `${{ github.run_number }}` |
           EOF
 
@@ -332,8 +344,8 @@ jobs:
           | **SSL / Secure** | \`true\` |
           | **REST URI** | \`$PUBLIC_URL\` |
           | **WebSocket URI** | \`wss://$PUBLIC_HOST:443/v4/websocket\` |
-          | **GC Engine** | \`Java 21 Generational ZGC (<1ms pauses)\` |
-          | **Transport** | \`Netty Native Linux Epoll\` |
+          | **GC Engine** | \`Java 25 Generational ZGC (<1ms pauses)\` |
+          | **Transport** | \`Netty Native Linux Epoll + koe 3.1.0 (PR #1235)\` |
           EOF
           sed -i 's/^[ ]\{10\}//' NODE_STATUS.md
           git config user.name "github-actions[bot]"

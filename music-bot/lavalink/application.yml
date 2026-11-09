@@ -5,19 +5,26 @@
 # choose a good source and keep Opus passthrough intact; everything below is
 # what actually decides whether the audio arrives clean.
 #
-# RUN THE LATEST 4.2.x (or newer) BUILD
-#   Lavalink 4.2.2 has a known audio send-path regression with DAVE (Discord's
-#   mandatory end-to-end voice encryption): the outgoing voice stream stalls
-#   100-400ms roughly once per second, which listeners hear as constant
-#   crackling / micro-dropouts even though ping is low.
+# RUN A BUILD WITH KOE 3.1.0 (Lavalink PR #1235)
+#   Lavalink 4.2.2 (and current `dev`) still ship koe 3.0.0, which has an audio
+#   send-path regression with DAVE (Discord's mandatory end-to-end voice
+#   encryption): the outgoing voice stream stalls 100-400ms roughly once per
+#   second, which listeners hear as constant crackling / micro-dropouts even
+#   though ping is low.
 #   See https://github.com/lavalink-devs/Lavalink/issues/1222
-#   Always run the newest 4.2.x release, not a pinned 4.2.2 jar.
+#   koe 3.1.0 serializes DAVE encryption (the libdave encryptor is not
+#   reentrant) and binds the DAVE manager to the live gateway connection.
+#   Until it is released, run the PR #1235 build - the workflow in this repo
+#   extracts it from ghcr.io/alula/lavalink (commit f733576).
 #
 # JVM (the flags matter as much as the yml):
 #   java -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -Xms1G -Xmx1G \
 #        -XX:+AlwaysPreTouch -jar Lavalink.jar
-#   On Java 21+ you can use ZGC instead (lower pauses, needs a little more RAM):
-#   java -XX:+UseZGC -XX:+ZGenerational -Xms1G -Xmx1G -jar Lavalink.jar
+#   On Java 23+ ZGC is generational by default (drop -XX:+ZGenerational - it was
+#   removed in JDK 24). Java 25 + koe 3.1.0 also wants the native-access flags:
+#   java --enable-native-access=ALL-UNNAMED \
+#        --sun-misc-unsafe-memory-access=allow \
+#        -XX:+UseZGC -Xms1G -Xmx2G -jar Lavalink.jar
 #   - Never run Lavalink on a CPU-limited/throttled shared runner; frame drops
 #     come from CPU starvation and GC pauses, not from the bot process.
 #   - Put the node in the same region as the voice channels it serves, on a

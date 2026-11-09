@@ -34,7 +34,7 @@ module.exports = {
     if (otherBotInVC) {
       return interaction.reply(
         warnText(
-          `Another bot (<@${otherBotInVC.user.id}>) is already active in <#${voiceChannel.id}>! Each bot manages its own voice channel.`
+          `Another bot (${otherBotInVC.user.username}) is already active in <#${voiceChannel.id}>! Each bot manages its own voice channel.`
         )
       );
     }

@@ -10,8 +10,23 @@ const {
 const { errorEmbed } = require("../../utils/embed");
 const { formatDuration, truncate, createProgressBar, formatRequester } = require("../../utils/formatters");
 const { getPlatformTheme, cleanTrackTitle } = require("../../utils/sourceManager");
+const { resolveFleetPlayer } = require("../../utils/playerResolver");
 const emojis = require("../../utils/emojis");
 const config = require("../../config");
+
+/**
+ * Discord only renders clickable title links for http(s) URLs and throws on
+ * anything else (e.g. `ytsearch:` identifiers), so validate before use.
+ */
+function safeHttpUrl(url) {
+  if (typeof url !== "string") return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -21,12 +36,20 @@ module.exports = {
       option.setName("page").setDescription("Specific page number to view").setMinValue(1)
     )
     .addBooleanOption((option) =>
-      option.setName("hide").setDescription("Hide queue view from other users in chat (default: true)")
+      option.setName("hide").setDescription("Hide queue view from other users in chat (default: false)")
     ),
 
   async execute(interaction, client) {
-    const hide = interaction.options.getBoolean("hide") ?? true;
-    const player = client.lavalink.getPlayer(interaction.guildId);
+    const hide = interaction.options.getBoolean("hide") ?? false;
+
+    // Slash commands reach whichever fleet clone Discord routed the interaction
+    // to. Resolve across the whole fleet so a sibling bot's active player is used
+    // instead of falsely reporting an empty queue.
+    const resolved = resolveFleetPlayer(client, interaction.guildId, {
+      userId: interaction.user?.id,
+      voiceChannelId: interaction.member?.voice?.channelId || null,
+    });
+    const player = resolved?.player || null;
     if (!player || (!player.queue.current && player.queue.tracks.length === 0)) {
       return interaction.reply({
         content: `${emojis.queue} The queue is currently empty. Use \`/play\` to add tracks!`,
@@ -69,10 +92,12 @@ module.exports = {
           : `\`${formatDuration(player.position)}\` ${createProgressBar(player.position, currentTrack.info.duration, 11)} \`${formatDuration(currentTrack.info.duration)}\``;
 
         embed.setTitle(`${emojis.play} Now Streaming: ${cleanTitle}`);
-        embed.setURL(currentTrack.info.uri || "https://discord.com");
+        const safeUri = safeHttpUrl(currentTrack.info.uri);
+        if (safeUri) embed.setURL(safeUri);
 
-        if (currentTrack.info.artworkUrl) {
-          embed.setThumbnail(currentTrack.info.artworkUrl);
+        const safeArtwork = safeHttpUrl(currentTrack.info.artworkUrl);
+        if (safeArtwork) {
+          embed.setThumbnail(safeArtwork);
         }
 
         embed.setDescription(

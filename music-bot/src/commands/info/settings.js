@@ -100,7 +100,7 @@ module.exports = {
     const active247List = all247.length > 0
       ? all247.map((r) => {
           const matchedBot = botsInGuild.find((b) => b.user.id === r.bot_user_id);
-          const name = matchedBot ? matchedBot.user.username : (r.bot_user_id === "default" ? "Primary Bot" : `<@${r.bot_user_id}>`);
+          const name = matchedBot ? matchedBot.user.username : (r.bot_user_id === "default" ? "Primary Bot" : `Bot ${r.bot_user_id}`);
           return `• **${name}:** <#${r.voice_channel_id}>`;
         }).join("\n")
       : "• *None active*";

@@ -431,7 +431,7 @@ module.exports = {
       return interaction.reply({
         content,
         components: [new ActionRowBuilder().addComponents(playBtn)],
-        flags: MessageFlags.Ephemeral,
+        flags: MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds,
         allowedMentions: { parse: [], users: [] },
       });
     }

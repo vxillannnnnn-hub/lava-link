@@ -170,7 +170,7 @@ module.exports = {
             actionWithButton(
               theme.badge || emojis.music,
               `Now playing **${cleanTitle}** by **${cleanAuthor}**`,
-              `${theme.name} • \`${duration}\` • Requested by <@${interaction.user.id}>`,
+              `${theme.name} • \`${duration}\` • Requested by **${truncate(interaction.user.username, 20)}**`,
               { customId: "btn_open_player", label: "Open Player", emoji: emojis.openPlayer, style: ButtonStyle.Secondary }
             )
           );
@@ -180,7 +180,7 @@ module.exports = {
           actionWithButton(
             emojis.check,
             `Added **${cleanTitle}** to queue (\`#${position}\`)`,
-            `${cleanAuthor} • \`${duration}\` • Requested by <@${interaction.user.id}>`,
+            `${cleanAuthor} • \`${duration}\` • Requested by **${truncate(interaction.user.username, 20)}**`,
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary }
           )
         );
@@ -220,7 +220,7 @@ module.exports = {
           actionWithButton(
             emojis.playlist,
             `Enqueued playlist **${title}** (\`${queued.length} tracks\`)`,
-            `Total Duration: \`${formatDuration(totalDuration)}\` • Requested by <@${interaction.user.id}>${capNote}`,
+            `Total Duration: \`${formatDuration(totalDuration)}\` • Requested by **${truncate(interaction.user.username, 20)}**${capNote}`,
             { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary }
           )
         );
@@ -248,7 +248,7 @@ module.exports = {
             actionWithButton(
               emojis.check,
               `Added **${cleanTitle}** to queue (\`#${player.queue.tracks.length}\`)`,
-              `Requested by <@${interaction.user.id}>`,
+              `Requested by **${truncate(interaction.user.username, 20)}**`,
               { customId: "cmd_queue", label: "View Queue", emoji: emojis.queue, style: ButtonStyle.Secondary }
             )
           );

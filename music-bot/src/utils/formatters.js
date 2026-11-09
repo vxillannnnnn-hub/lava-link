@@ -112,14 +112,15 @@ function truncate(text, length = 60) {
 }
 
 /**
- * Format requester safely as clean text without triggering Discord pings (Jockie/Eara Style)
+ * Format requester as clean display text WITHOUT any Discord mention token
+ * (no `<@id>`, no `@handle`) so nothing can ping or trigger mention pills.
  * @param {object} requester 
  * @returns {string}
  */
 function formatRequester(requester) {
   if (!requester) return "Listener";
   const name = requester.globalName || requester.displayName || requester.username || requester.tag;
-  return name ? `@${name}` : "Listener";
+  return name || "Listener";
 }
 
 module.exports = {

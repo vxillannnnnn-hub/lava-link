@@ -1,12 +1,22 @@
+# NOTE: The live 24/7 node is deployed by .github/workflows/main.yml on a
+# GitHub Actions runner (not by this file). This compose file is kept for a
+# Docker/VPS deployment and uses the same audio fix as the workflow:
+# Lavalink PR #1235 = koe 3.1.0, which removes the DAVE send-path stalls
+# (lavalink-devs/Lavalink#1222) heard as constant crackle/jitter.
 version: "3.8"
 
 services:
   lavalink:
-    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    # PR #1235 build (koe 3.1.0 + libdave 0.2.0). -alpine = Java 25, needed for
+    # the FFM DAVE path. Pinned by index digest so the tag cannot drift.
+    image: ghcr.io/alula/lavalink@sha256:8362c8d9df6b2f8d2599cc35ec4c28b6da954ffc8753cd2d23b0a5c95fbab201
     container_name: lavalink
     restart: unless-stopped
     environment:
-      - JAVA_OPTS=-XX:+UseZGC -XX:+ZGenerational -Xms1G -Xmx2G -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -Dio.netty.transport.noNative=false -Dio.netty.allocator.type=pooled -Dio.netty.allocator.numDirectArenas=4 -Dio.netty.recycler.maxCapacityPerThread=4096 -Dnetworkaddress.cache.ttl=60 -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true -Djdk.net.hosts.resolver=SYSTEM
+      # The image entrypoint is exec-form (`java -jar ...`), so JAVA_OPTS is
+      # never read. JAVA_TOOL_OPTIONS is picked up by the JVM itself.
+      # -XX:+ZGenerational was removed in JDK 24; ZGC is generational by default.
+      - JAVA_TOOL_OPTIONS=-XX:+UseZGC -Xms1G -Xmx2G -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -Dio.netty.transport.noNative=false -Dio.netty.allocator.type=pooled -Dio.netty.allocator.numDirectArenas=4 -Dio.netty.recycler.maxCapacityPerThread=4096 -Dnetworkaddress.cache.ttl=300 -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true -Djdk.net.hosts.resolver=SYSTEM
       - LAVALINK_SERVER_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
       - PLUGINS_YOUTUBE_OAUTH_REFRESH_TOKEN=${YOUTUBE_REFRESH_TOKEN:-}
     volumes:
@@ -15,7 +25,8 @@ services:
     ports:
       - "4998:4998"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -H \"Authorization: $${LAVALINK_SERVER_PASSWORD:-youshallnotpass}\" http://localhost:4998/version || exit 1"]
+      # alpine has no curl/wget guarantees; busybox nc confirms the port is open
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4998 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
