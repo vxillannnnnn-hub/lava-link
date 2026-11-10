@@ -795,6 +795,17 @@ async function handlePlayerButton(interaction, client) {
 
     case "ctrl_stop": {
       if (!checkDJ(false)) return;
+      if (player.get("247")) {
+        await playerActions.stopPlayback(player, { clearQueue: true, executeAutoplay: false });
+        voiceStatusManager.setIdleVoiceStatus(client, player.voiceChannelId, player.guildId);
+        return interaction.update({
+          content: `${emojis.stop} Playback stopped and queue cleared (24/7 Mode Active).`,
+          embeds: [],
+          components: [],
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [], users: [] },
+        });
+      }
       player.queue.tracks.splice(0, player.queue.tracks.length);
       await player.destroy("User pressed Stop button in Controls Drawer");
       return await interaction.update({

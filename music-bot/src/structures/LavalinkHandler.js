@@ -130,6 +130,8 @@ if (Player && Player.prototype && !Player.prototype._patchedResilientPlay) {
  * @param {import("discord.js").Client} client 
  */
 function initLavalink(client) {
+  const idleLeave = require("../utils/idleLeave");
+
   const manager = new LavalinkManager({
     nodes: [
       {
@@ -164,7 +166,10 @@ function initLavalink(client) {
         destroyPlayer: false, // Keep session alive on network glitch
       },
       onEmptyQueue: {
-        destroyAfterMs: config.player.inactivityTimeoutMs,
+        // destroyAfterMs is deliberately NOT set: lavalink-client runs that
+        // timer without looking at our 24/7 flag (and 0 destroys immediately),
+        // which disconnected permanent channels minutes after a queue end. The
+        // countdown lives in utils/idleLeave.js so it can honour 247.
         // Native autoplay hook: the ONLY place autoplay adds tracks when the
         // queue runs out. lavalink-client plays whatever we queue here.
         autoPlayFunction: async (player, track) => {
@@ -257,6 +262,9 @@ function initLavalink(client) {
 
     // Always cache last played track so autoplay has an immutable recommendation seed
     player.set("lastPlayedTrack", track);
+
+    // A track started: the inactivity countdown no longer applies.
+    idleLeave.cancel(player);
     player.set("autoPaused", false);
     player.set("voteskips", new Set()); // votes never carry over to the next track
 
@@ -424,10 +432,15 @@ function initLavalink(client) {
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
       }
     }
+
+    // Not 24/7: leave after the configured inactivity window, but only if no
+    // track and 247 is still off when it fires.
+    idleLeave.schedule(player, client);
   })));
 
   manager.on("playerDestroy", safeAsync((player) => emojis.runWithClient(client, () => {
     stopRealtimeProgressLoop(player);
+    idleLeave.cancel(player);
     player.set("ownerId", null);
     logger.debug(`Player destroyed for guild ${player.guildId}`);
     updateRequestChannelDashboard(client, player.guildId, null);
