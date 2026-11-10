@@ -38,11 +38,11 @@
     "auto_pause_enabled": true,
     "stage_auto_speaker": true,
     "mode_247": true,
-    "voice_247_channel_id": "1524739599082066115",
-    "text_247_channel_id": "1524739599082066115",
-    "bot_247_user_id": "1568193148222443591",
+    "voice_247_channel_id": "1524739599082066113",
+    "text_247_channel_id": "1524739598935396421",
+    "bot_247_user_id": "1568538833518202991",
     "multi_ownership": false,
-    "updated_at": 1794130040739
+    "updated_at": 1794204850549
   },
   "1555968929023664208": {
     "prefix": ".",

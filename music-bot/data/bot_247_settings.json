@@ -1,5 +1,11 @@
 [
   {
+    "guild_id": "1555968929023664208",
+    "bot_user_id": "1568538354742722691",
+    "voice_channel_id": "1555968937467056231",
+    "text_channel_id": "1555968935935877191"
+  },
+  {
     "guild_id": "test_guild_999999",
     "bot_user_id": "111111111111111111",
     "voice_channel_id": "vc_channel_111",
@@ -10,5 +16,29 @@
     "bot_user_id": "222222222222222222",
     "voice_channel_id": "vc_channel_222",
     "text_channel_id": "txt2"
+  },
+  {
+    "guild_id": "1524739596670337197",
+    "bot_user_id": "1568538354742722691",
+    "voice_channel_id": "1524739599082066114",
+    "text_channel_id": "1524739599082066114"
+  },
+  {
+    "guild_id": "1524739596670337197",
+    "bot_user_id": "1568193148222443591",
+    "voice_channel_id": "1524739599082066115",
+    "text_channel_id": "1524739599082066115"
+  },
+  {
+    "guild_id": "1524739596670337197",
+    "bot_user_id": "1568539143032668180",
+    "voice_channel_id": "1524739599082066112",
+    "text_channel_id": "1524739598935396421"
+  },
+  {
+    "guild_id": "1524739596670337197",
+    "bot_user_id": "1568538833518202991",
+    "voice_channel_id": "1524739599082066113",
+    "text_channel_id": "1524739598935396421"
   }
 ]
