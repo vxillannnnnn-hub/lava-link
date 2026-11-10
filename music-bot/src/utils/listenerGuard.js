@@ -118,6 +118,14 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
         `[ListenerGuard] Human listener(s) present (${humans}) in guild ${player.guildId}. Auto-leave cancelled.`
       );
     }
+    // Resume here rather than in the caller: 24/7 never arms a leave timer, so
+    // its pause had no "cancelled" signal and stayed paused forever.
+    if (player.paused && player.get?.("autoPaused")) {
+      await player.resume().catch(() => {});
+      player.set("autoPaused", false);
+      logger.info(`[ListenerGuard] Resumed playback in guild ${player.guildId}: a listener joined.`);
+      return { humans, action: "resumed" };
+    }
     return { humans, action: cancelled ? "cancelled" : "listening" };
   }
 

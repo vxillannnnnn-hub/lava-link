@@ -71,11 +71,8 @@ module.exports = {
 
       const outcome = await listenerGuard.enforce(player, client, { notify: true });
 
-      // Humans returned: undo the auto-pause we applied when the room emptied.
-      if (outcome.action === "cancelled" && player.paused && player.get("autoPaused")) {
-        await player.resume().catch(() => {});
-        player.set("autoPaused", false);
-        logger.info(`Auto-resumed playback in guild ${guildId} because a listener joined.`);
+      // The guard already undid its own auto-pause; keep the status panel in sync.
+      if (outcome.action === "resumed") {
         const voiceStatusManager = require("../../utils/voiceStatusManager");
         voiceStatusManager.onResume(client, player);
       }
