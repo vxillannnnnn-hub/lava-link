@@ -572,8 +572,11 @@ jobs:
           node -e "try { const db = require('./src/database/db'); db.checkpoint(); db.exportJson(); } catch(e){}" || true
           cd ..
           
-          # Stage persistent files
-          git add -f music-bot/data/guild_settings.json music-bot/data/user_playlists.json music-bot/data/user_favorites.json music-bot/data/active_sessions.json music-bot/data/bot.db 2>/dev/null || true
+          # Stage every persistent mirror. bot_247_settings.json was missing from
+          # this list, so the export left it modified; the rebase below then
+          # aborted with "You have unstaged changes" and the push was rejected.
+          # Only *.json mirrors and the SQLite file are tracked; WAL/SHM stay ignored.
+          git add -f music-bot/data/*.json music-bot/data/bot.db 2>/dev/null || true
           
           if git diff --staged --quiet; then
             echo "No persistent data changes to commit."
@@ -585,14 +588,16 @@ jobs:
             for attempt in 1 2 3; do
               echo "Push attempt $attempt..."
               git fetch --unshallow 2>/dev/null || git fetch origin ${{ github.ref_name }} || true
-              if git rebase -X ours origin/${{ github.ref_name }}; then
+              # The bot can rewrite a mirror between the commit and this loop;
+              # autostash keeps the tree clean instead of aborting the rebase.
+              if git -c rebase.autoStash=true rebase -X ours origin/${{ github.ref_name }}; then
                 if git push https://x-access-token:${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}; then
                   echo "✅ Persistent state pushed successfully!"
                   break
                 fi
               else
                 git rebase --abort || true
-                git pull --rebase origin ${{ github.ref_name }} || true
+                git -c rebase.autoStash=true pull --rebase origin ${{ github.ref_name }} || true
                 if git push https://x-access-token:${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}; then
                   echo "✅ Persistent state pushed successfully after rebase!"
                   break
