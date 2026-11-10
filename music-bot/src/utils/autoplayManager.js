@@ -36,6 +36,7 @@ const PREVIEW_MAX_MS = config.player?.quality?.previewMaxDurationMs ?? 31000;
 const MIN_TRACK_MS = Math.max(45000, PREVIEW_MAX_MS);
 const MAX_TRACK_MS = 900000; // 15 minutes: skip podcasts / long mixes
 const RESOLVE_TIMEOUT_MS = config.player?.autoplayTimeoutMs ?? 7000;
+const listenerGuard = require("./listenerGuard");
 const DISLIKE_TTL_MS = 30 * 60 * 1000;
 const MAX_DISLIKED = 20;
 
@@ -588,6 +589,18 @@ class AutoplayManager {
     if (!player) return false;
     if (!Boolean(player.get("autoplay"))) return false;
     if (player._autoplayRunning) return false;
+
+    // Never generate a recommendation for an empty room. This was the real
+    // source of endless playback: no voiceStateUpdate fires for a channel that
+    // was already empty (restart, boot while alone), so the autoplay hook kept
+    // refilling the queue forever with nobody listening. 24/7 is explicit
+    // intent to keep the radio running, so it is exempt.
+    if (!player.get("247") && listenerGuard.isAlone(player)) {
+      logger.debug(
+        `[Autoplay] Skipped recommendation for guild ${player.guildId}: voice channel has no listeners.`
+      );
+      return false;
+    }
 
     player._autoplayRunning = true;
     try {

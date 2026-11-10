@@ -38,6 +38,9 @@ module.exports = {
     maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "500", 10),
     inactivityTimeoutMs: parseInt(process.env.INACTIVITY_TIMEOUT_MS || "180000", 10), // 3 minutes
     emptyChannelTimeoutMs: parseInt(process.env.EMPTY_CHANNEL_TIMEOUT_MS || "120000", 10), // 2 minutes
+    // 24/7 keeps the bot connected, but streaming to an empty room still costs
+    // CPU/bandwidth and looks broken. Pause instead of leaving; resume on join.
+    pauseAloneIn247: process.env.PAUSE_ALONE_IN_247 !== "false",
     autoReconnect: true,
     gaplessPreload: true, // Pre-resolve next track/autoplay recommendation in background
     minAutoPlayMs: parseInt(process.env.MIN_AUTOPLAY_MS || "5000", 10), // anti-spam guard between autoplay hand-offs

@@ -1,4 +1,5 @@
 const fs = require("fs");
+const listenerGuard = require("./listenerGuard");
 const path = require("path");
 const { execSync } = require("child_process");
 const logger = require("./logger");
@@ -206,16 +207,15 @@ class StateManager {
           if (!voiceChannel) continue;
 
           // Check if voice channel still has active human listeners (skip only if not 24/7).
-          // Bots must not count: an uncached sibling bot previously looked human,
-          // so an abandoned channel was restored on every restart.
-          let humanListeners = 0;
-          for (const vs of guild.voiceStates.cache.values()) {
-            if (vs.channelId !== session.voiceChannelId || vs.id === client.user.id) continue;
-            const isBot = vs.member?.user?.bot || guild.members.cache.get(vs.id)?.user?.bot;
-            if (!isBot) humanListeners++;
-          }
+          // Same counter as the live watchdog so restored sessions and runtime
+          // events cannot disagree about who is listening.
+          const humanListeners = listenerGuard.countHumanListeners(client, guild, session.voiceChannelId);
 
-          if (humanListeners === 0 && !session.autoplay && !session.is247) {
+          // Autoplay is not a reason to resurrect an abandoned session: it used
+          // to restore a queue into an empty channel and then keep generating
+          // music there forever, because no voiceStateUpdate fires after a boot
+          // to arm the empty-channel watchdog. Only 24/7 is intent to stay.
+          if (humanListeners === 0 && !session.is247) {
             logger.debug(`[StateManager] Voice channel in ${guild.name} is empty. Skipping restore.`);
             continue;
           }

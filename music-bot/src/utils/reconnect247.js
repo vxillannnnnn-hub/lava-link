@@ -4,6 +4,7 @@ const config = require("../config");
 const audioOptimizer = require("./audioOptimizer");
 const voiceStatusManager = require("./voiceStatusManager");
 const multiBotCoordinator = require("./multiBotCoordinator");
+const listenerGuard = require("./listenerGuard");
 
 // Per-client guard to prevent concurrent reconnect loops while allowing fleet instances to reconnect concurrently
 const reconnectingClients = new Set();
@@ -108,6 +109,9 @@ async function reconnect247(client) {
 function start247HealthCheck(client) {
   const timer = setInterval(() => {
     if (client?.isReady()) {
+      // Event-independent safety net: pause/leave an abandoned channel even when
+      // no voiceStateUpdate ever fired for it (restored sessions, boot while alone).
+      listenerGuard.reconcile(client).catch(() => {});
       reconnect247(client).catch(() => {});
     }
   }, 60000);
