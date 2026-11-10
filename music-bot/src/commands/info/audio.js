@@ -2,11 +2,12 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js"
 const config = require("../../config");
 const emojis = require("../../utils/emojis");
 const audioQuality = require("../../utils/audioQuality");
+const frameMonitor = require("../../utils/frameMonitor");
+const voiceBitrateManager = require("../../utils/voiceBitrateManager");
 const { truncate, formatDuration } = require("../../utils/formatters");
 
 // Codec-path knowledge lives in audioQuality so this command and the frame
 // monitor can never disagree about what counts as a transcode.
-const OPUS_NATIVE_SOURCES = audioQuality.OPUS_NATIVE_SOURCES;
 const hasActiveFilters = audioQuality.hasActiveFilters;
 
 /**
@@ -45,7 +46,7 @@ function describeCodecPath(player, track) {
   }
 
   const source = String(track.info?.sourceName || "").toLowerCase();
-  if (OPUS_NATIVE_SOURCES.has(source)) {
+  if (audioQuality.isOpusNativeTrack(track)) {
     return {
       label: "Direct Opus passthrough",
       detail: "Bit-exact Opus frames forwarded to Discord — no decode, no re-encode, no extra latency.",
@@ -85,6 +86,10 @@ module.exports = {
     const track = player?.queue?.current || null;
     const codec = describeCodecPath(player, track);
 
+    // Live, guild-scoped judgement: dropped frames vs node CPU, our transcode
+    // count and the volume this player is running at.
+    const live = player ? await frameMonitor.guildVerdict(player, client).catch(() => null) : null;
+
     const voiceChannel = player?.voiceChannelId
       ? client.channels.cache.get(player.voiceChannelId) ||
         (await client.channels.fetch(player.voiceChannelId).catch(() => null))
@@ -105,6 +110,28 @@ module.exports = {
     const selfCheck = client.audioSelfCheck;
     const plugins = (selfCheck?.plugins || node?.info?.plugins?.map((p) => `${p.name}@${p.version}`) || []).slice(0, 8);
 
+    const severityEmoji =
+      live?.severity === "healthy" ? emojis.check : live?.severity === "critical" ? emojis.cross : emojis.warn;
+
+    const verdictField = {
+      name: `${severityEmoji} Live Verdict`,
+      value: live
+        ? truncate(
+            [
+              `\u2022 ${live.verdict}`,
+              `\u2022 **Frames:** \`${live.droppedFrames}\` dropped / \`${live.sentFrames}\` sent \u2022 \`${live.dropRatePercent.toFixed(1)}%\` over \`${live.windowSeconds}s\``,
+              `\u2022 **Node CPU:** \`${live.nodeCpu === null ? "unknown" : `${(live.nodeCpu * 100).toFixed(0)}%`}\` \u2022 **Our players:** \`${live.ourPlayingPlayers}\` (\`${live.ourTranscodingPlayers}\` transcoding)`,
+              `\u2022 **Volume:** \`${live.volume}%\` \u2022 **Path:** \`${live.passthrough ? "opus passthrough" : "decode \u2192 re-encode"}\``,
+              live.fix
+                ? `\u2022 **Fix:** ${live.fix}`
+                : "\u2022 **Fix:** none needed \u2014 this guild is already on the lossless path.",
+            ].join("\n"),
+            1020
+          )
+        : "No active player in this server. Play something with `/play` for a live measurement.",
+      inline: false,
+    };
+
     const embed = new EmbedBuilder()
       .setColor(config.colors.surface || 0x2b2d31)
       .setTitle(`${emojis.equalizer} Audio Path Diagnostics`)
@@ -117,6 +144,7 @@ module.exports = {
           : "No active player in this server. Play something with `/play` for a live measurement."
       )
       .addFields(
+        verdictField,
         {
           name: "Codec Path",
           value: `• **Mode:** \`${codec.label}\`\n• ${codec.detail}\n• **Volume:** ${volumeLine}`,
@@ -136,6 +164,7 @@ module.exports = {
           value:
             `• **Channel:** ${player?.voiceChannelId ? `<#${player.voiceChannelId}>` : "`not connected`"}\n` +
             `• **Channel bitrate:** \`${channelBitrate}\` (guild max \`${guildMaxBitrate}\`)\n` +
+            `• **Auto-tune:** ${voiceBitrateManager.describe(interaction.guildId, voiceChannel)}\n` +
             `• **Listening:** \`${voiceChannel ? Math.max(0, voiceChannel.members.filter((m) => !m.user.bot).size) : 0} human listener(s)\``,
           inline: false,
         },

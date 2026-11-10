@@ -31,6 +31,10 @@ module.exports = {
     const cleanTitle = truncate(track.info.title, 60);
     const uri = safeHttpUrl(track.info.uri);
 
+    // The DM below is a second REST call that can be rate limited, so ack the
+    // interaction first instead of racing Discord's 3s window.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     try {
       const dmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -54,7 +58,7 @@ module.exports = {
         allowedMentions: { parse: [], users: [] },
       });
 
-      return interaction.reply(
+      return interaction.editReply(
         actionWithButton(
           emojis.save,
           `Sent **[${cleanTitle}](${uri})** straight to your Direct Messages!`,
@@ -67,7 +71,7 @@ module.exports = {
         )
       );
     } catch (err) {
-      return interaction.reply(
+      return interaction.editReply(
         errorText(
           "Could not deliver Direct Message!",
           "Please ensure your Discord privacy settings allow Direct Messages from server members."

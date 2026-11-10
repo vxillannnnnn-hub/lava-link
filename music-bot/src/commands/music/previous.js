@@ -26,6 +26,10 @@ module.exports = {
       return interaction.reply(errorText(djCheck.reason));
     }
 
+    // play() round-trips to the node before audio starts; acknowledge first so
+    // a cold node cannot turn a successful rewind into "interaction failed".
+    await interaction.deferReply();
+
     // Keep the interrupted song so the listener can return to it.
     const interruptedTrack = player.queue.current;
     const voiceStatusManager = require("../../utils/voiceStatusManager");
@@ -40,7 +44,7 @@ module.exports = {
     const title = truncate(cleanTrackTitle(previousTrack.info.title), 40);
     const author = truncate(previousTrack.info.author, 24);
 
-    return interaction.reply(
+    return interaction.editReply(
       actionText(emojis.previous, `Playing previous track: **${title}** by **${author}**.`)
     );
   },

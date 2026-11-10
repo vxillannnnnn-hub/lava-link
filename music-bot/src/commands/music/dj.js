@@ -27,7 +27,7 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
       return interaction.reply(errorText("You need **Manage Server** permissions to configure DJ settings."));
     }
 
@@ -37,6 +37,12 @@ module.exports = {
 
     if (subcommand === "set") {
       const role = interaction.options.getRole("role");
+      // Prefix form `.dj set` with no role used to die on `role.id`.
+      if (!role) {
+        return interaction.reply(
+          errorText("Mention the role to use: `/dj set role:@DJ` or `.dj set @DJ`.")
+        );
+      }
       db.setDjSettings(interaction.guildId, role.id, true);
 
       return interaction.reply(

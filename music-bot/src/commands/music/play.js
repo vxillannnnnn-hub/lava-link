@@ -107,7 +107,14 @@ module.exports = {
 
       let resolved = await player.search({ query: formattedQuery }, interaction.user);
 
-      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl && !forcedSource) {
+      // A metadata-only forced platform (Spotify / JioSaavn) has no audio of its
+      // own when the node lacks the matching provider, so fall back to YouTube.
+      const forcedIsMetadata = forcedSource ? audioQuality.isMetadataOnlyPlatform(forcedSource) : false;
+      if (
+        (!resolved || !resolved.tracks || resolved.tracks.length === 0) &&
+        !isUrl &&
+        (!forcedSource || forcedIsMetadata)
+      ) {
         resolved = await player.search({ query: `ytsearch:${query}` }, interaction.user);
       }
 
@@ -149,6 +156,16 @@ module.exports = {
         // Never stream a 30s preview or a low-bitrate mirror when a full-length
         // Opus source for the same song is available.
         const track = await audioQuality.ensureFullQualityTrack(player, searchRes.tracks[0], interaction.user);
+        if (!track) {
+          return interaction.editReply(errorText(`No tracks found matching \`${query}\`.`));
+        }
+        // Single tracks used to bypass the cap, so one user could queue an
+        // unbounded number of tracks and pin the guild's session snapshot.
+        if (queueCapacity(player) <= 0) {
+          return interaction.editReply(
+            errorText(`The queue is full (${config.player.maxQueueSize} tracks). Wait for it to drain or run \`/clear\`.`)
+          );
+        }
         player.queue.add(track);
         const position = player.queue.tracks.length;
         const willPlayNow = !player.playing && !player.paused;

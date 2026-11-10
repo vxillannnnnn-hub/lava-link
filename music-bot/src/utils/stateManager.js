@@ -104,7 +104,9 @@ class StateManager {
       // Atomic write: a crash mid-write must never leave a truncated snapshot
       // that the next runner then refuses to parse.
       const tmpStateFile = `${STATE_FILE}.tmp.${Date.now()}`;
-      fs.writeFileSync(tmpStateFile, JSON.stringify(payload, null, 2), "utf8");
+      // Compact JSON: this runs on a 60s interval in the main thread, so the
+      // pretty-printed variant doubled the blocking write for no benefit.
+      fs.writeFileSync(tmpStateFile, JSON.stringify(payload), "utf8");
       fs.renameSync(tmpStateFile, STATE_FILE);
 
       if (sessions.length > 0) {
@@ -160,7 +162,18 @@ class StateManager {
       }
 
       const raw = fs.readFileSync(STATE_FILE, "utf8");
-      const data = JSON.parse(raw);
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseErr) {
+        // A truncated snapshot would otherwise throw on every single boot and
+        // block restoration permanently.
+        logger.warn(`[StateManager] Discarding unreadable session snapshot: ${parseErr.message}`);
+        try {
+          fs.unlinkSync(STATE_FILE);
+        } catch (_) {}
+        return;
+      }
 
       if (!data || !Array.isArray(data.sessions) || data.sessions.length === 0) {
         return;
@@ -192,10 +205,15 @@ class StateManager {
           const voiceChannel = guild.channels.cache.get(session.voiceChannelId) || await guild.channels.fetch(session.voiceChannelId).catch(() => null);
           if (!voiceChannel) continue;
 
-          // Check if voice channel still has active human listeners (skip only if not 24/7)
-          const humanListeners = guild.voiceStates.cache.filter(
-            (vs) => vs.channelId === session.voiceChannelId && vs.id !== client.user.id
-          ).size;
+          // Check if voice channel still has active human listeners (skip only if not 24/7).
+          // Bots must not count: an uncached sibling bot previously looked human,
+          // so an abandoned channel was restored on every restart.
+          let humanListeners = 0;
+          for (const vs of guild.voiceStates.cache.values()) {
+            if (vs.channelId !== session.voiceChannelId || vs.id === client.user.id) continue;
+            const isBot = vs.member?.user?.bot || guild.members.cache.get(vs.id)?.user?.bot;
+            if (!isBot) humanListeners++;
+          }
 
           if (humanListeners === 0 && !session.autoplay && !session.is247) {
             logger.debug(`[StateManager] Voice channel in ${guild.name} is empty. Skipping restore.`);
@@ -244,10 +262,23 @@ class StateManager {
               ? client.lavalink.utils.buildTrack(session.currentTrack, session.currentTrack.requester)
               : session.currentTrack;
 
+            // Advance by the downtime so continuous playback resumes where it
+            // would be now, but never seek past the end of the track: Lavalink
+            // rejects that position and the whole restore would fail.
+            const trackDuration = Number(session.currentTrack.info?.duration) || 0;
+            const elapsed = ageMs > 0 && !session.paused ? ageMs : 0;
+            const resumePosition = Math.max(
+              0,
+              Math.min(
+                (session.position || 0) + elapsed,
+                trackDuration > 0 ? Math.max(0, trackDuration - 2000) : Number.MAX_SAFE_INTEGER
+              )
+            );
+
             await player.play({
               clientTrack: builtCurrent,
               track: { encoded: session.currentTrack.encoded },
-              position: Math.max(0, (session.position || 0) + (ageMs > 0 && !session.paused ? ageMs : 0)),
+              position: resumePosition,
               paused: session.paused || false,
             });
 

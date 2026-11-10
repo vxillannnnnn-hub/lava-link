@@ -4,6 +4,7 @@ const stateManager = require("../../utils/stateManager");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
 const presenceManager = require("../../utils/presenceManager");
 const { start247HealthCheck } = require("../../utils/reconnect247");
+const voiceBitrateManager = require("../../utils/voiceBitrateManager");
 const emojis = require("../../utils/emojis");
 
 module.exports = {
@@ -49,6 +50,10 @@ module.exports = {
 
     // Initialize real-time Dynamic Streaming Presence Engine (ActivityType.Streaming)
     presenceManager.initPresence(client);
+
+    // Arm the adaptive bitrate governor: raises each music channel to the tier
+    // ceiling, repairs drift, and backs off if the link cannot sustain it.
+    voiceBitrateManager.start(client);
 
     // Arm self-healing 60-second health check to keep 24/7 channels connected permanently
     start247HealthCheck(client);

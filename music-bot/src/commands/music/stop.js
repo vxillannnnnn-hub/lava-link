@@ -20,6 +20,10 @@ module.exports = {
       return interaction.reply(errorText(djCheck.reason));
     }
 
+    // destroy() and stopPlaying() both round-trip to the node; acknowledge first
+    // so a slow node cannot turn a successful stop into "interaction failed".
+    await interaction.deferReply();
+
     const vcId = player.voiceChannelId;
     player.queue.tracks.splice(0, player.queue.tracks.length);
 
@@ -29,7 +33,7 @@ module.exports = {
       await playerActions.stopPlayback(player, { clearQueue: true, executeAutoplay: false });
       const voiceStatusManager = require("../../utils/voiceStatusManager");
       voiceStatusManager.setIdleVoiceStatus(client, vcId, interaction.guildId);
-      return interaction.reply(
+      return interaction.editReply(
         actionText(
           emojis.stop,
           "Audio stream stopped and queue cleared.",
@@ -40,7 +44,7 @@ module.exports = {
 
     await player.destroy("User ran /stop command");
 
-    return interaction.reply(
+    return interaction.editReply(
       actionText(
         emojis.stop,
         "Audio stream stopped and queue cleared.",

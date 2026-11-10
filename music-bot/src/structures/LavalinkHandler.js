@@ -253,9 +253,6 @@ function initLavalink(client) {
   // Player Audio Lifecycle Events
   // ---------------------------------------------------------------------------
   manager.on("trackStart", safeAsync((player, track) => emojis.runWithClient(client, async () => {
-    if (!player.textChannelId) return;
-    const channel = client.channels.cache.get(player.textChannelId);
-
     logger.info(`Started playing "${track.info.title}" in guild ${player.guildId}`);
 
     // Always cache last played track so autoplay has an immutable recommendation seed
@@ -299,6 +296,10 @@ function initLavalink(client) {
     // Update real-time bot Streaming Presence (Purple Stream Badge with Song Title)
     presenceManager.onTrackStart(client, player, track);
 
+    // The dashboard is optional, the audio bookkeeping above is not: a 24/7
+    // player with no bound text channel still needs its autoplay history, frame
+    // baseline, voice status and presence armed for the track that is playing.
+    const channel = player.textChannelId ? client.channels.cache.get(player.textChannelId) : null;
     if (!channel) return;
 
     try {
@@ -321,8 +322,10 @@ function initLavalink(client) {
       voiceStatusManager.onTrackStart(client, player, nextTrack);
     } else if (!hasNext) {
       voiceStatusManager.onTrackEnd(client, player);
+      // Only drop the streaming presence when nothing follows. Doing it on every
+      // trackEnd made the presence flicker back to idle between songs.
+      presenceManager.onTrackEnd(client);
     }
-    presenceManager.onTrackEnd(client);
   })));
 
   manager.on("trackStuck", safeAsync((player, track, payload) => emojis.runWithClient(client, async () => {

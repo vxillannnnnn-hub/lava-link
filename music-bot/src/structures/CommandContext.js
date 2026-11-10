@@ -1,4 +1,16 @@
 /**
+ * Subcommands accepted by the prefix parser, per command. Used so a bare
+ * argument is not mistaken for a subcommand name.
+ */
+const SUBCOMMANDS = {
+  playlist: ["create", "save-queue", "play", "play-favorites", "list", "view", "delete"],
+  dj: ["set", "toggle", "status", "clear"],
+  autoplay: ["toggle", "status", "clear", "mode"],
+  settings: ["view", "multi-ownership"],
+  config: ["view", "multi-ownership"],
+};
+
+/**
  * Unified Command Context Adapter
  * Bridges Discord Slash Commands (ChatInputCommandInteraction) and Prefix Message Commands
  * into a single unified API, allowing 100% code reusability without duplicating command files.
@@ -32,7 +44,8 @@ class CommandContext {
       this.options = interaction.options;
     } else {
       // Determine if the command uses subcommands (e.g. .playlist create or .dj set)
-      const hasSubcommand = ["playlist", "dj", "autoplay", "settings", "config"].includes(commandName?.toLowerCase());
+      const subcommands = SUBCOMMANDS[commandName?.toLowerCase()];
+      const hasSubcommand = Boolean(subcommands);
       const effectiveArgs = hasSubcommand ? this.args.slice(1) : this.args;
 
       this.options = {
@@ -41,7 +54,12 @@ class CommandContext {
             if (required) return "view";
             return null;
           }
-          return this.args[0].toLowerCase();
+          const candidate = this.args[0].toLowerCase();
+          // `.playlist chill` is a name, not a subcommand. Returning the raw
+          // token made the command fall through every branch and reply with
+          // nothing at all; null lets each command apply its documented default.
+          if (subcommands && !subcommands.includes(candidate)) return null;
+          return candidate;
         },
         getSubcommandGroup: () => null,
 

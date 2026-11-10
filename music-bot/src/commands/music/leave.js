@@ -19,9 +19,12 @@ module.exports = {
       const db = require("../../database/db");
       db.set247(interaction.guildId, false, null, null, client.user.id);
     }
+    // destroy() is a node REST call plus a voice close; acknowledge first so a
+    // slow node cannot fail the interaction after the bot has already left.
+    await interaction.deferReply();
     await player.destroy("User ran /leave command");
 
-    return interaction.reply(
+    return interaction.editReply(
       actionText(emojis.leave, "Disconnected from voice channel.", vcId ? `Left <#${vcId}>` : null)
     );
   },

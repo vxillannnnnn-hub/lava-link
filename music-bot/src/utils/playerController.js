@@ -80,8 +80,9 @@ function buildNowPlayingEmbed(player) {
     .setColor(0x2b2d31)
     .setDescription(`${line1}\n${requesterBadge}\n\n${line3}`);
 
-  if (track.info.artworkUrl) {
-    embed.setThumbnail(track.info.artworkUrl);
+  const artworkUrl = safeHttpUrl(track.info.artworkUrl, null);
+  if (artworkUrl) {
+    embed.setThumbnail(artworkUrl);
   }
 
   return embed;
@@ -916,17 +917,6 @@ async function handlePlayerButton(interaction, client) {
         allowedMentions: { parse: [], users: [] },
       });
     }
-    case "ctrl_crossfade": {
-      if (!checkDJ(false)) return;
-      const seconds = Math.max(0, Math.min(10, Number(interaction.options.getString("duration")) || 3));
-      await volumeManager.setCrossfade(player, seconds * 1000);
-      return interaction.followUp({
-        content: `${emojis.crossfade} Crossfade set to **${seconds}** second${seconds !== 1 ? "s" : ""}`,
-        flags: MessageFlags.Ephemeral,
-        allowedMentions: { parse: [], users: [] },
-      });
-    }
-
     case "btn_loop": {
       if (!checkDJ(false)) return;
       let nextMode = "off";
@@ -1238,4 +1228,5 @@ module.exports = {
   startRealtimeProgressLoop,
   stopRealtimeProgressLoop,
   keepDashboardAtBottom,
+  getDashboardPayload,
 };

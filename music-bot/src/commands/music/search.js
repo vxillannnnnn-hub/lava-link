@@ -15,6 +15,22 @@ const emojis = require("../../utils/emojis");
 const config = require("../../config");
 const audioQuality = require("../../utils/audioQuality");
 
+/**
+ * Discord rejects non-http(s) thumbnail URLs (and nodes can report relative
+ * artwork paths), which would fail the whole search menu payload.
+ */
+function safeHttpUrl(url) {
+  if (typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+    } catch (_) {
+      // fall through
+    }
+  }
+  return null;
+}
+
 // Store active search results in memory temporarily
 const activeSearches = new Map();
 
@@ -155,7 +171,7 @@ module.exports = {
       selectMenu.addOptions(
         new StringSelectMenuOptionBuilder()
           .setLabel(`${index + 1}. ${cleanTitle}`)
-          .setDescription(`${cleanAuthor} • ${duration}`)
+          .setDescription(`${cleanAuthor} • ${formatDuration(duration)}`)
           .setValue(index.toString())
           .setEmoji(emojis.music)
       );
@@ -179,8 +195,9 @@ module.exports = {
       )
       .setTimestamp();
 
-    if (tracks[0]?.info?.artworkUrl) {
-      embed.setThumbnail(tracks[0].info.artworkUrl);
+    const artworkUrl = safeHttpUrl(tracks[0]?.info?.artworkUrl);
+    if (artworkUrl) {
+      embed.setThumbnail(artworkUrl);
     }
 
     const row = new ActionRowBuilder().addComponents(selectMenu);

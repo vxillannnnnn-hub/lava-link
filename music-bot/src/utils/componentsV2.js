@@ -11,6 +11,22 @@ const config = require("../config");
 
 const DEFAULT_ARTWORK = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300";
 
+/**
+ * Discord rejects the entire payload (400) when a media URL is not http(s), and
+ * nodes can report relative or empty artwork, so validate before building.
+ */
+function safeMediaUrl(url, fallback = DEFAULT_ARTWORK) {
+  if (typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+    } catch (_) {
+      // fall through
+    }
+  }
+  return fallback;
+}
+
 class ComponentsV2Container {
   constructor(accentColor = 0x2b2d31) {
     this.type = 17;
@@ -19,7 +35,7 @@ class ComponentsV2Container {
   }
 
   addSection(textContent, mediaUrl = null) {
-    const validUrl = mediaUrl || DEFAULT_ARTWORK;
+    const validUrl = safeMediaUrl(mediaUrl);
     const section = {
       type: 9,
       components: [

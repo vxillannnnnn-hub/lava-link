@@ -6,6 +6,7 @@ const config = require("../../config");
 const audioOptimizer = require("../../utils/audioOptimizer");
 const voiceStatusManager = require("../../utils/voiceStatusManager");
 const multiBotCoordinator = require("../../utils/multiBotCoordinator");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -14,6 +15,21 @@ module.exports = {
 
   async execute(interaction, client) {
     let player = client.lavalink.getPlayer(interaction.guildId);
+
+    // 24/7 is a server-level setting that survives restarts, so it takes the
+    // same admin gate as /setup-channel. An existing session's DJ may also
+    // toggle it, which keeps the normal "DJ parks the bot" workflow working.
+    const isAdmin = interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild);
+    if (!isAdmin) {
+      const djCheck = player
+        ? djManager.canManagePlayer(interaction.member, player, false)
+        : { allowed: false };
+      if (!djCheck.allowed) {
+        return interaction.reply(
+          errorText("You need **Manage Server** or DJ permissions to change 24/7 mode.")
+        );
+      }
+    }
 
     // Identify target voice channel: either member's current VC or existing player VC
     const memberVC = interaction.member?.voice?.channel;
@@ -65,6 +81,10 @@ module.exports = {
         return interaction.reply(errorText(`I lack permission to **Connect** to <#${targetVC.id}>.`));
       }
 
+      // Voice handshake + node REST happen below, so acknowledge first: the
+      // reply would otherwise race Discord's 3s window on a cold node.
+      await interaction.deferReply();
+
       // 1. Permanently save to SQLite and JSON mirror for THIS bot
       db.set247(interaction.guildId, true, targetVC.id, interaction.channelId, botId);
 
@@ -93,7 +113,7 @@ module.exports = {
       }
 
       const botTag = client.user.username || "Bot";
-      return interaction.reply(
+      return interaction.editReply(
         actionText(
           emojis.time,
           `24/7 Voice Channel mode **ENABLED** for **${botTag}** in <#${targetVC.id}>.`,

@@ -33,7 +33,7 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
       return interaction.reply(
         errorText("You need **Manage Server** permissions to configure the song request channel.")
       );

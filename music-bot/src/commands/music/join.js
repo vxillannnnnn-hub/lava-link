@@ -43,10 +43,15 @@ module.exports = {
 
     // A player can exist with a dead voice connection; creating a second player
     // for the same guild is invalid, so reconnect the existing one instead.
+    if (player && player.connected && player.voiceChannelId === voiceChannel.id) {
+      return interaction.reply(warnText("I am already connected to your voice channel!"));
+    }
+
+    // connect() is a node REST call plus a voice handshake and can exceed the 3s
+    // interaction window on a cold node, so acknowledge before doing it.
+    await interaction.deferReply();
+
     if (player) {
-      if (player.connected && player.voiceChannelId === voiceChannel.id) {
-        return interaction.reply(warnText("I am already connected to your voice channel!"));
-      }
       player.voiceChannelId = voiceChannel.id;
       player.textChannelId = interaction.channelId;
       await player.connect();
@@ -58,7 +63,7 @@ module.exports = {
         db.set247(interaction.guildId, true, voiceChannel.id, interaction.channelId, client.user.id);
       }
 
-      return interaction.reply(
+      return interaction.editReply(
         actionText(emojis.volumeNormal, `Moved to voice channel <#${voiceChannel.id}>.`)
       );
     }
@@ -78,7 +83,7 @@ module.exports = {
     const voiceStatusManager = require("../../utils/voiceStatusManager");
     voiceStatusManager.setIdleVoiceStatus(client, voiceChannel.id, interaction.guildId);
 
-    return interaction.reply(
+    return interaction.editReply(
       actionText(emojis.volumeNormal, `Connected to <#${voiceChannel.id}>.`, "Use `/play` to stream audio")
     );
   },

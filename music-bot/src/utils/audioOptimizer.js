@@ -1,79 +1,26 @@
-const { PermissionFlagsBits, ChannelType } = require("discord.js");
 const logger = require("./logger");
 const config = require("../config");
+const voiceBitrateManager = require("./voiceBitrateManager");
 
 /**
  * Audio Optimizer & Fidelity Tuner
- * - Automatically maximizes Discord voice channel bitrate to server maximum (up to 384 kbps)
+ * - Delegates voice channel bitrate to the adaptive governor (raise, verify,
+ *   reconcile drift, back off when the link is dropping frames)
  * - Pre-loads next queued track in background for true 0ms gapless transitions
  */
 class AudioOptimizer {
-  constructor() {
-    // Map<guildId, number> to prevent excessive bitrate update API spam
-    this.optimizedGuilds = new Map();
-  }
-
   /**
-   * Automatically maximize Discord Voice Channel bitrate to the guild's highest supported tier
-   * (e.g. 64k -> 96k, 128k, 256k, or 384k for Nitro Boosted servers)
-   * @param {import("discord.js").VoiceChannel|import("discord.js").StageChannel} voiceChannel 
-   * @param {import("discord.js").Client} client 
+   * Bring the voice channel to the best bitrate it can actually sustain.
+   * Kept as the stable entry point used by join/trackStart/voiceStateUpdate;
+   * the governor owns the tier ceiling, drift repair and adaptive steps.
+   * @param {import("discord.js").VoiceChannel|import("discord.js").StageChannel} voiceChannel
+   * @param {import("discord.js").Client} client
    */
   async maximizeVoiceBitrate(voiceChannel, client) {
-    if (!config.player.autoMaximizeBitrate) return;
-    if (!voiceChannel || !voiceChannel.guild) return;
-
-    // Only operate on standard voice channels or stage channels
-    if (
-      voiceChannel.type !== ChannelType.GuildVoice &&
-      voiceChannel.type !== ChannelType.GuildStageVoice
-    ) {
-      return;
-    }
-
-    const guild = voiceChannel.guild;
-    const now = Date.now();
-    const lastOptimized = this.optimizedGuilds.get(guild.id) || 0;
-
-    // Rate-limit checks per guild (once every 5 minutes max)
-    if (now - lastOptimized < 300000) return;
-
-    try {
-      // Determine guild max bitrate: 96000, 128000, 256000, or 384000
-      let maxBitrate = guild.maximumBitrate || 96000;
-
-      // Discord API strictly limits Stage channels to 64,000 bps max (Error 50035)
-      if (voiceChannel.type === ChannelType.GuildStageVoice) {
-        maxBitrate = Math.min(maxBitrate, 64000);
-      }
-
-      const currentBitrate = voiceChannel.bitrate || 64000;
-
-      if (currentBitrate < maxBitrate) {
-        const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
-        if (!me) return;
-
-        const hasManageChannels = voiceChannel.permissionsFor(me)?.has(PermissionFlagsBits.ManageChannels);
-        if (!hasManageChannels) {
-          logger.debug(
-            `[AudioOptimizer] Cannot auto-boost bitrate in #${voiceChannel.name} (Missing ManageChannels permission)`
-          );
-          return;
-        }
-
-        await voiceChannel.setBitrate(
-          maxBitrate,
-          "AudioOptimizer: Auto-maximized voice channel for ultra-high audio fidelity"
-        );
-
-        this.optimizedGuilds.set(guild.id, now);
-        logger.info(
-          `[AudioOptimizer] Boosted #${voiceChannel.name} in "${guild.name}" from ${Math.round(currentBitrate / 1000)}kbps to ${Math.round(maxBitrate / 1000)}kbps (Guild Tier Max)`
-        );
-      }
-    } catch (err) {
-      logger.debug(`[AudioOptimizer] Voice channel bitrate adjustment skipped: ${err.message}`);
-    }
+    if (!config.player.autoMaximizeBitrate) return null;
+    return voiceBitrateManager.ensure(voiceChannel, client, {
+      reason: "AudioOptimizer: voice channel tuned for the best sustainable fidelity",
+    });
   }
 
   /**

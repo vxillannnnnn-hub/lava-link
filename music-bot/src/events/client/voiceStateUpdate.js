@@ -8,6 +8,32 @@ const emojis = require("../../utils/emojis");
 // Map to store guild leave timeouts when voice channel is empty
 const emptyChannelTimeouts = new Map();
 
+/**
+ * Humans connected to a voice channel, counted from live voice states.
+ *
+ * `!vs.member?.user?.bot` is not enough on its own: with a bounded member cache
+ * an uncached sibling bot looks human, which kept the bot connected to empty
+ * channels and stopped the auto-pause from ever firing.
+ */
+function countHumanListeners(client, guild, channelId) {
+  if (!guild || !channelId) return 0;
+
+  const multiBotCoordinator = require("../../utils/multiBotCoordinator");
+  let humans = 0;
+
+  for (const vs of guild.voiceStates.cache.values()) {
+    if (vs.channelId !== channelId || vs.id === client.user?.id) continue;
+    if (multiBotCoordinator.allBotIds?.includes(vs.id)) continue;
+    const isBot =
+      vs.member?.user?.bot ||
+      guild.members.cache.get(vs.id)?.user?.bot ||
+      client.users.cache.get(vs.id)?.bot;
+    if (!isBot) humans++;
+  }
+
+  return humans;
+}
+
 module.exports = {
   name: "voiceStateUpdate",
   async execute(oldState, newState, client) {
@@ -17,7 +43,7 @@ module.exports = {
       // -------------------------------------------------------------------------
       // 1. Stage Channel Auto-Speaker & Voice Fidelity Auto-Maximizer
       // -------------------------------------------------------------------------
-      if (newState.id === client.user.id && newState.channel) {
+      if (newState.id === client.user?.id && newState.channel) {
         // Auto-boost voice channel bitrate to guild maximum (up to 384 kbps)
         audioOptimizer.maximizeVoiceBitrate(newState.channel, client);
 
@@ -37,7 +63,7 @@ module.exports = {
       // -------------------------------------------------------------------------
       // 2. Disconnect / Kick / Move Cleanup
       // -------------------------------------------------------------------------
-      if (oldState.id === client.user.id && !newState.channelId) {
+      if (oldState.id === client.user?.id && !newState.channelId) {
         logger.info(`Bot ${client.user?.username} was disconnected from voice channel in guild: ${guildId}`);
         const is247 = Boolean(player?.get("247"));
         // In 24/7 mode the queue is the whole point. Keep the player (and its
@@ -62,7 +88,7 @@ module.exports = {
       }
 
       // Handle bot moved between voice channels (only when moved from an existing channel)
-      if (oldState.id === client.user.id && newState.channelId && oldState.channelId && oldState.channelId !== newState.channelId) {
+      if (oldState.id === client.user?.id && newState.channelId && oldState.channelId && oldState.channelId !== newState.channelId) {
         const voiceStatusManager = require("../../utils/voiceStatusManager");
         voiceStatusManager.clearVoiceStatus(client, oldState.channelId, guildId);
         if (player && player.playing && !player.paused && player.queue.current) {
@@ -77,15 +103,10 @@ module.exports = {
       // -------------------------------------------------------------------------
       if (!player.voiceChannelId) return;
 
-      // Count non-bot members in voice channel using live gateway voiceStates cache (reliable across 1M+ servers)
-      const multiBotCoordinator = require("../../utils/multiBotCoordinator");
-      const humanListeners = newState.guild.voiceStates.cache.filter(
-        (vs) =>
-          vs.channelId === player.voiceChannelId &&
-          vs.id !== client.user.id &&
-          !multiBotCoordinator.allBotIds.includes(vs.id) &&
-          !vs.member?.user?.bot
-      ).size;
+      // Count non-bot members using the live gateway voiceStates cache (reliable
+      // across 1M+ servers, and independent of the bounded member cache).
+      const listeningChannelId = player.voiceChannelId;
+      const humanListeners = countHumanListeners(client, newState.guild, listeningChannelId);
 
       const timeoutKey = `${guildId}_${client.user.id}`;
 
@@ -128,13 +149,10 @@ module.exports = {
           }
 
           const timeout = setTimeout(async () => {
-            const stillHumanListeners = newState.guild.voiceStates.cache.filter(
-              (vs) =>
-                vs.channelId === player.voiceChannelId &&
-                vs.id !== client.user.id &&
-                !multiBotCoordinator.allBotIds.includes(vs.id) &&
-                !vs.member?.user?.bot
-            ).size;
+            // Re-count against the channel this timer was armed for: the player
+            // may have been moved since, and a stale count would leave the bot
+            // connected (or disconnect it from an occupied channel).
+            const stillHumanListeners = countHumanListeners(client, newState.guild, listeningChannelId);
 
             if (stillHumanListeners === 0) {
               logger.info(`Auto-leaving voice channel in guild ${guildId} for ${client.user.username} due to inactivity.`);

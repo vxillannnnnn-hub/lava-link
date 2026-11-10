@@ -90,20 +90,24 @@ lavalink:
       lowPass: true
 
     # --- Audio quality / latency knobs ---------------------------------------
-    # JDA-NAS buffer. 400ms is the safe default: it rides through normal GC
-    # pauses. Drop to ~250 only if you have measured smooth playback; raise to
-    # 800-1000 if the node is shared and you hear periodic gaps.
-    bufferDurationMs: 400
+    # JDA-NAS buffer. 400ms is Lavalink's default; 600ms rides out the longer GC
+    # pauses that show up as periodic gaps on a shared node, at the cost of
+    # ~200ms extra time-to-first-audio. Drop to ~250 only after measuring.
+    bufferDurationMs: 600
+    # No fresh allocation per frame on the send path. Less GC pressure is the
+    # cheapest way to stop 20ms frames from being dropped under load.
+    nonAllocatingFrameBuffer: true
     # How much decoded audio is kept buffered. 5000ms = resilient to jitter.
     frameBufferDurationMs: 5000
     # Opus encoder quality, 0-10. Only used when the source is NOT already Opus
     # (mirrors, MP3/AAC streams, livestreams, or any track with volume != 100).
     # 10 = best fidelity; it has zero effect on passthrough tracks.
     opusEncodingQuality: 10
-    # Resampling quality, LOW/MEDIUM/HIGH. Also transcode-only, but it is the
-    # one thing that removes the "muffled / metallic" character of
-    # 44.1kHz -> 48kHz material (SoundCloud, MP3/AAC mirrors).
-    resamplingQuality: HIGH
+    # Resampling quality, LOW/MEDIUM/HIGH. Transcode-only, and HIGH costs
+    # several times the CPU per player while only affecting resampled material
+    # (SoundCloud, MP3/AAC mirrors). CPU pressure on the node is exactly what
+    # drops frames - i.e. audible stutter - so MEDIUM is the better trade here.
+    resamplingQuality: MEDIUM
     # How long a track may deliver no audio before it is treated as stuck.
     # 10s is Lavalink's default; a lower value skips slow-starting tracks and is
     # heard as the song randomly cutting out.

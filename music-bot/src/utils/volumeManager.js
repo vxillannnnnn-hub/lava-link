@@ -40,14 +40,29 @@ function clampVolume(level) {
 async function applyVolume(player, level) {
   const result = clampVolume(level);
 
-  await player.setVolume(result.applied);
-  // Keep the user's intent visible for the UI/ diagnostics without ever sending
+  if (!player || typeof player.setVolume !== "function") {
+    throw new TypeError("A live player is required to change the volume.");
+  }
+
+  // Only write when the value actually changes: each request is one PATCH to
+  // the node, and re-sending the same value re-arms the decode path for nothing.
+  if (Number(player.volume) !== result.applied) {
+    await player.setVolume(result.applied);
+  }
+
+  // Keep the user's intent visible for the UI/diagnostics without ever sending
   // a clipping gain to Lavalink.
   player.set("requestedVolume", result.requested);
 
   if (result.capped) {
     logger.debug(
       `[Volume] Guild ${player.guildId}: requested ${result.requested}%, applied ${result.applied}% (unity) to avoid Opus clipping.`
+    );
+  }
+
+  if (result.applied !== UNITY_VOLUME) {
+    logger.debug(
+      `[Volume] Guild ${player.guildId}: ${result.applied}% is attenuation, so the node decodes and re-encodes; bit-exact Opus passthrough returns at 100%.`
     );
   }
 
@@ -75,24 +90,11 @@ function describe(result) {
 }
 
 
-/** 
- * Set crossfade duration for smooth transitions between tracks.
- * @param {import("lavalink-client").Player} player
- * @param {number} durationMs Crossfade duration in milliseconds (0-30000)
- */
-async function setCrossfade(player, durationMs) {
-  const duration = Math.max(0, Math.min(durationMs || 0, 30000));
-  await player.setCrossfade(duration);
-  player.set("crossfadeDuration", duration);
-  return duration;
-}
-
 
 module.exports = {
   UNITY_VOLUME,
   clampVolume,
   applyVolume,
-  setCrossfade,
   capNotice,
   describe,
 };

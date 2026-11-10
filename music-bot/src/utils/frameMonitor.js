@@ -28,6 +28,9 @@ const audioQuality = require("./audioQuality");
 
 // One Opus frame is 20ms of audio.
 const FRAME_MS = 20;
+// Total silence in a track window that a listener will actually notice. Two
+// frames over a four-minute track is measurement noise, not a defect.
+const AUDIBLE_SILENCE_MS = 100;
 // How many raw samples to retain for on-demand summaries.
 const MAX_HISTORY = 240;
 
@@ -289,6 +292,118 @@ function summarizeSamples(samples, options = {}) {
   report.hasEnoughSamples = report.windows >= minSamples;
   report.verdict = describeVerdict(report);
   return report;
+}
+
+/**
+ * Everything that forces this player onto the decode -> re-encode path, in the
+ * order a listener would fix them. Each reason carries the single action that
+ * removes it, so the verdict never has to guess at a fix.
+ *
+ * @param {import("lavalink-client").Player} player
+ * @param {object|null} track
+ * @returns {Array<{ key: string, label: string, fix: string }>}
+ */
+function transcodeReasons(player, track) {
+  const reasons = [];
+  if (!track?.info) return reasons;
+
+  const volume = Number(player?.volume ?? 100);
+  if (volume !== 100) {
+    reasons.push({
+      key: "volume",
+      label: `volume ${volume}% instead of unity`,
+      fix: "Set the volume to 100% with `/volume 100`. Every other value makes the node decode and re-encode the whole track - a second lossy generation, and the CPU work that drops frames.",
+    });
+  }
+
+  if (audioQuality.hasActiveFilters(player)) {
+    reasons.push({
+      key: "filter",
+      label: "an active DSP filter",
+      fix: "Reset the filters with `/filter reset`. DSP needs decoded PCM, so it always re-encodes - check the clean path before blaming the node.",
+    });
+  }
+
+  if (track.info.isStream) {
+    reasons.push({
+      key: "stream",
+      label: "a livestream (no Opus packets to forward)",
+      fix: "Nothing to fix for a livestream: it can only be encoded live, so its quality is capped by the source bitrate.",
+    });
+  } else if (audioQuality.isMetadataOnlyTrack(track)) {
+    reasons.push({
+      key: "mirror",
+      label: `${track.info.sourceName || "a metadata-only provider"} mirror audio`,
+      fix: "Play the song through the default YouTube Music source (`/play`), which hands the node real Opus packets instead of a re-encoded mirror.",
+    });
+  } else if (!audioQuality.isOpusNativeTrack(track)) {
+    reasons.push({
+      key: "codec",
+      label: `${track.info.codec || track.info.sourceName || "a non-Opus"} source`,
+      fix: `Use an Opus source for this track (YouTube Music / SoundCloud). The node is receiving ${track.info.codec || "a non-Opus codec"} and has to transcode it.`,
+    });
+  }
+
+  return reasons;
+}
+
+/**
+ * Choose the one action worth taking, by what actually costs frames.
+ *
+ * Priority: our own transcode (volume, then filters) -> the source's codec ->
+ * node CPU -> the node-wide transcode count -> the node's route to Discord.
+ * A list of four suspects is not actionable, so exactly one fix comes back.
+ *
+ * @param {{ audible: boolean, passthrough: boolean, reasons?: object[], nodeCpu?: number|null, ourPlayingPlayers?: number, ourTranscodingPlayers?: number, correlation?: number|null }} context
+ * @returns {{ severity: "healthy"|"warning"|"critical", fix: string|null }}
+ */
+function recommendFix(context) {
+  const {
+    audible,
+    passthrough,
+    reasons = [],
+    nodeCpu = null,
+    ourPlayingPlayers = 0,
+    ourTranscodingPlayers = 0,
+    correlation = null,
+  } = context;
+
+  // Clean window: only suggest something if the path itself is lossy.
+  if (!audible) {
+    if (passthrough) return { severity: "healthy", fix: null };
+    const cause = reasons.find((reason) => reason.key !== "stream");
+    return { severity: "healthy", fix: cause ? cause.fix : null };
+  }
+
+  // Audible dropouts: fix our own doing first, it is free and immediate.
+  const selfInflicted = reasons.find((reason) => reason.key === "volume" || reason.key === "filter");
+  if (selfInflicted) return { severity: "critical", fix: selfInflicted.fix };
+
+  const sourceIssue = reasons.find((reason) => reason.key === "mirror" || reason.key === "codec");
+  if (sourceIssue) return { severity: "warning", fix: sourceIssue.fix };
+
+  if (nodeCpu !== null && nodeCpu >= 0.7) {
+    const correlated =
+      correlation !== null && correlation >= 0.3
+        ? `, and the sampled windows agree (drops rise with CPU, r=${correlation.toFixed(2)})`
+        : "";
+    return {
+      severity: "critical",
+      fix: `The node is CPU-starved (Lavalink CPU ${(nodeCpu * 100).toFixed(0)}%)${correlated}. Give it more cores or move guilds off it before changing anything else.`,
+    };
+  }
+
+  if (ourTranscodingPlayers > 0) {
+    return {
+      severity: "warning",
+      fix: `${ourTranscodingPlayers} of our ${Math.max(ourPlayingPlayers, ourTranscodingPlayers)} playing players are transcoding; that is the cheapest load to remove - set those guilds to 100% volume with no filters.`,
+    };
+  }
+
+  return {
+    severity: "warning",
+    fix: "Nothing on the bot side is transcoding, so the gaps are the node's route to Discord (or the koe 3.0.0 DAVE stall): run the patched Lavalink build configured in application.yml and host the node in the voice region.",
+  };
 }
 
 class FrameMonitor {
@@ -564,6 +679,120 @@ class FrameMonitor {
     );
     return delta;
   }
+
+  /**
+   * Live verdict for one guild.
+   *
+   * Unlike the node-wide correlation report, this judges the playback the user
+   * is actually listening to: the frames the node dropped while *this* track
+   * played, compared against the node's CPU, how many of our players are
+   * transcoding and this player's own volume. The node frame counter is
+   * node-wide, so the numbers are labelled as such rather than pretending to be
+   * per-track in isolation.
+   *
+   * @param {import("lavalink-client").Player} player
+   * @param {import("discord.js").Client} [client]
+   */
+  async guildVerdict(player, client = player?.lavalink?.client) {
+    const track = player?.queue?.current || null;
+    const node = player?.node || null;
+    const volume = Number(player?.volume ?? 100);
+
+    // Fresh counters when the node answers (one REST call), sampled ones when not.
+    const read = node ? await this.readNode(node) : { frames: null, stats: null };
+    const liveFrames = read.frames || this.latest(node);
+
+    const nodeCpu = nullableNum(read.stats?.cpu?.lavalinkLoad) ?? nullableNum(node?.stats?.cpu?.lavalinkLoad);
+    const systemCpu = nullableNum(read.stats?.cpu?.systemLoad) ?? nullableNum(node?.stats?.cpu?.systemLoad);
+    const cores = nullableNum(read.stats?.cpu?.cores) ?? nullableNum(node?.stats?.cpu?.cores);
+    const playingPlayers = nullableNum(read.stats?.playingPlayers) ?? nullableNum(node?.stats?.playingPlayers);
+
+    const ours = activePlayerSummaries(client);
+    const passthrough = audioQuality.isPassthroughTrack(player, track);
+    const reasons = transcodeReasons(player, track);
+    const summary = node ? this.summarize(node) : null;
+
+    const base = {
+      available: false,
+      severity: "unknown",
+      verdict: "",
+      fix: null,
+      windowSeconds: 0,
+      sentFrames: 0,
+      droppedFrames: 0,
+      silenceMs: 0,
+      dropRatePercent: 0,
+      audible: false,
+      nodeCpu,
+      systemCpu,
+      cores,
+      playingPlayers,
+      ourPlayingPlayers: ours.length,
+      ourTranscodingPlayers: ours.filter((p) => !p.passthrough).length,
+      passthrough,
+      transcodeReasons: reasons.map((reason) => reason.label),
+      volume,
+      correlation: summary?.hasEnoughSamples ? summary.cpu : null,
+    };
+
+    if (!track) {
+      return {
+        ...base,
+        verdict: "No track is playing, so there is nothing to measure. Start one with `/play`.",
+      };
+    }
+
+    // baseline is recorded at trackStart and cleared at trackEnd, so this is
+    // exactly the window the listener has heard so far.
+    const delta = diffFrames(player.get("frameBaseline"), liveFrames);
+    if (!delta) {
+      return {
+        ...base,
+        verdict: "Frame counters are not baselined yet - the verdict appears a few seconds into the track.",
+      };
+    }
+
+    const startedAt = Number(player.get("frameBaselineAt")) || Date.now();
+    const windowSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+    const total = delta.sent + delta.deficit;
+    const dropRatePercent = total > 0 ? (delta.deficit / total) * 100 : 0;
+    const silenceMs = delta.deficit * FRAME_MS;
+    const warnRate = num(config.audio.frameWarnRatePercent) || 1;
+    const audible = silenceMs >= AUDIBLE_SILENCE_MS || dropRatePercent >= warnRate;
+
+    const cpuText = nodeCpu === null ? "unknown" : `${(nodeCpu * 100).toFixed(0)}%`;
+    const labels = reasons.map((reason) => reason.label).join(", ");
+
+    const verdict = audible
+      ? `${delta.deficit} frame(s) (~${silenceMs} ms of silence) dropped in ${windowSeconds}s while the node ran at ${cpuText} CPU, ${base.ourTranscodingPlayers}/${base.ourPlayingPlayers} of our players were transcoding and volume was ${volume}%.`
+      : passthrough
+        ? `No audible dropouts in ${windowSeconds}s (${delta.deficit} frame(s), ${dropRatePercent.toFixed(1)}%) and this track is on the bit-exact Opus path.`
+        : `No audible dropouts in ${windowSeconds}s, but this track is being re-encoded (${labels}).`;
+
+    const { severity, fix } = recommendFix({
+      audible,
+      passthrough,
+      reasons,
+      nodeCpu,
+      ourPlayingPlayers: base.ourPlayingPlayers,
+      ourTranscodingPlayers: base.ourTranscodingPlayers,
+      correlation: base.correlation,
+    });
+
+    return {
+      ...base,
+      available: true,
+      windowSeconds,
+      sentFrames: delta.sent,
+      droppedFrames: delta.deficit,
+      silenceMs,
+      dropRatePercent,
+      audible,
+      severity,
+      verdict,
+      fix,
+    };
+  }
 }
 
 module.exports = new FrameMonitor();
@@ -576,3 +805,5 @@ module.exports.activePlayerSummaries = activePlayerSummaries;
 module.exports.pearson = pearson;
 module.exports.summarizeSamples = summarizeSamples;
 module.exports.describeVerdict = describeVerdict;
+module.exports.transcodeReasons = transcodeReasons;
+module.exports.recommendFix = recommendFix;

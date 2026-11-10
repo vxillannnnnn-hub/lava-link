@@ -70,6 +70,29 @@ module.exports = {
     },
   },
 
+  // Adaptive voice-channel bitrate governor (see utils/voiceBitrateManager.js)
+  voiceBitrate: {
+    // Same env switch as before, so the existing workflow keeps working.
+    enabled: process.env.AUTO_MAXIMIZE_BITRATE !== "false",
+    // Hard cap. 384000 is Discord's own ceiling (boost tier 3).
+    max: parseInt(process.env.VOICE_BITRATE_MAX || "384000", 10),
+    // Never adapt below this: below it music audibly loses detail for no gain.
+    min: parseInt(process.env.VOICE_BITRATE_MIN || "64000", 10),
+    // One adaptive step. Smaller steps are gentler but correct too slowly.
+    stepDown: parseInt(process.env.VOICE_BITRATE_STEP || "64000", 10),
+    // How often the governor checks every active player.
+    tickMs: parseInt(process.env.VOICE_BITRATE_TICK_MS || "15000", 10),
+    // Attempt throttles: a rejected edit must never become one REST call per track.
+    retryCooldownMs: parseInt(process.env.VOICE_BITRATE_RETRY_MS || "300000", 10),
+    adaptCooldownMs: parseInt(process.env.VOICE_BITRATE_ADAPT_MS || "300000", 10),
+    // Clean windows needed before climbing back one step.
+    healthyWindowsForUp: parseInt(process.env.VOICE_BITRATE_UP_WINDOWS || "4", 10),
+    // Ceiling on how often we may lower a channel, so it cannot oscillate.
+    maxDownshiftsPerHour: parseInt(process.env.VOICE_BITRATE_MAX_DOWNSHIFTS || "2", 10),
+    // Silence in a track window that counts as audible damage.
+    audibleSilenceMs: parseInt(process.env.VOICE_BITRATE_AUDIBLE_MS || "100", 10),
+  },
+
   // Node frame-health telemetry (see utils/frameMonitor.js)
   audio: {
     // How often node frame counters are sampled. Each sample logs only when

@@ -36,8 +36,9 @@ const DEFAULT_METADATA_ONLY_SOURCES = [
   "flowery-tts",
 ];
 
-// Sources whose frames reach Lavalink already encoded as Opus.
-const OPUS_NATIVE_SOURCES = new Set(["youtube", "soundcloud", "http", "bandcamp"]);
+// Sources whose frames usually reach Lavalink already encoded as Opus. Bandcamp
+// is deliberately absent: it serves MP3, so it always has to be re-encoded.
+const OPUS_NATIVE_SOURCES = new Set(["youtube", "soundcloud", "http"]);
 
 const METADATA_ONLY_SOURCES = new Set(
   (quality.metadataOnlySources || DEFAULT_METADATA_ONLY_SOURCES).map((s) => String(s).toLowerCase())
@@ -69,6 +70,26 @@ function sourceOf(track) {
   return String(track?.info?.sourceName || "").toLowerCase();
 }
 
+/**
+ * Container codec reported by the node (`opus`, `mp3`, `aac`, ...). It is the
+ * only reliable signal for whether frames can be forwarded bit-exact, so it
+ * wins over the source name whenever the node reports one.
+ */
+function codecOf(track) {
+  return String(track?.info?.codec || "").toLowerCase();
+}
+
+/**
+ * True when the node holds Opus frames for this track. A direct HTTP MP3 stream
+ * shares a "native" source name but still has to be transcoded, so the source
+ * name is only a fallback for nodes that report no codec at all.
+ */
+function isOpusNativeTrack(track) {
+  const codec = codecOf(track);
+  if (codec) return codec === "opus";
+  return OPUS_NATIVE_SOURCES.has(sourceOf(track));
+}
+
 function isMetadataOnlyTrack(track) {
   return METADATA_ONLY_SOURCES.has(sourceOf(track));
 }
@@ -98,7 +119,7 @@ function isPassthroughTrack(player, track) {
   if (hasActiveFilters(player)) return false;
   if (Number(player?.volume ?? 100) !== 100) return false;
   if (isMetadataOnlyTrack(track)) return false;
-  return OPUS_NATIVE_SOURCES.has(sourceOf(track));
+  return isOpusNativeTrack(track);
 }
 
 /**
@@ -318,6 +339,8 @@ async function ensureFullQualityTracks(player, tracks, requester, options = {}) 
 
 module.exports = {
   OPUS_NATIVE_SOURCES,
+  codecOf,
+  isOpusNativeTrack,
   hasActiveFilters,
   isPassthroughTrack,
   METADATA_ONLY_SOURCES,

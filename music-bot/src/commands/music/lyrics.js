@@ -6,6 +6,22 @@ const config = require("../../config");
 const logger = require("../../utils/logger");
 
 /**
+ * Discord rejects non-http(s) thumbnail URLs, which would fail the whole reply
+ * after the defer (the user just sees "interaction failed").
+ */
+function safeHttpUrl(url) {
+  if (typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+    } catch (_) {
+      // fall through
+    }
+  }
+  return null;
+}
+
+/**
  * Fetch lyrics from Lavalink v4 or LRCLIB fallback
  */
 async function fetchLyrics(player, queryTitle, queryAuthor) {
@@ -149,8 +165,9 @@ async function executeLyricsLookup(interaction, player, queryInput = null) {
     .setDescription(`**Artist:** \`${cleanAuthor}\`\n\n${lyricsBody}`)
     .setFooter({ text: `${lyricType} • Pulse Lyrics Engine` });
 
-  if (currentTrack?.info?.artworkUrl) {
-    embed.setThumbnail(currentTrack.info.artworkUrl);
+  const artworkUrl = safeHttpUrl(currentTrack?.info?.artworkUrl);
+  if (artworkUrl) {
+    embed.setThumbnail(artworkUrl);
   }
 
   return interaction.editReply({
