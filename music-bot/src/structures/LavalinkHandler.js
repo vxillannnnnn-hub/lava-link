@@ -271,7 +271,6 @@ function initLavalink(client) {
     // single click.
     player.set("voteskips", new Set());
     player.set("autoPaused", false);
-    player.set("voteskips", new Set()); // votes never carry over to the next track
 
     // Record track in autoplay history buffer so it is never repeated
     autoplayManager.recordTrackPlayed(player.guildId, track.info.identifier, track.info.title, track.info.author);

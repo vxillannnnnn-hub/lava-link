@@ -394,12 +394,12 @@ function startRealtimeProgressLoop(player, client) {
       if (player.paused || player.queue?.current?.info?.isStream) return;
 
       const channelId = player.textChannelId;
-      if (!channelId) return;
+      if (!channelId) { stopRealtimeProgressLoop(player); return; }
 
       const channel = client.channels.cache.get(channelId);
-      if (!channel) return;
+      if (!channel) { player._dashboardChannelMisses = (player._dashboardChannelMisses || 0) + 1; if (player._dashboardChannelMisses >= 3) stopRealtimeProgressLoop(player); return; }
 
-      await sendOrUpdatePlayerDashboard(channel, player);
+      player._dashboardChannelMisses = 0; await sendOrUpdatePlayerDashboard(channel, player);
     } catch (err) {
       logger.debug(`Dashboard progress tick notice [${player.guildId}]:`, err.message);
     }

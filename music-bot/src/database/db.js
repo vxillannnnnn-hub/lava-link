@@ -304,12 +304,19 @@ const stmts = {
  * Atomic file writer: writes to a temporary file then renames, preventing truncated reads.
  */
 function atomicWriteJson(filePath, data) {
+  const serialized = JSON.stringify(data, null, 2);
+  const tmpPath = `${filePath}.tmp.${Date.now()}`;
   try {
-    const tmpPath = `${filePath}.tmp.${Date.now()}`;
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+    fs.writeFileSync(tmpPath, serialized, "utf8");
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+    // A rename can fail on Windows while a reader (git sync, dashboard) holds
+    // the target. Never leave the .tmp file behind, and fall back to a direct
+    // write so the mirror is still refreshed.
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch (_) {}
+    fs.writeFileSync(filePath, serialized, "utf8");
   }
 }
 
@@ -764,7 +771,9 @@ module.exports = {
   },
 
   getPlaylist(userId, name) {
-    return stmts.getPlaylistByName.get(userId, name.trim()) || null;
+    const cleanName = String(name ?? "").trim();
+    if (!userId || !cleanName) return null;
+    return stmts.getPlaylistByName.get(userId, cleanName) || null;
   },
 
   deletePlaylist(playlistId) {
@@ -803,14 +812,19 @@ module.exports = {
 
   // Favorites
   addFavorite(userId, track) {
+    // uri is NOT NULL in the schema; an unresolvable track would throw here and
+    // take down the button handler instead of simply failing to save.
+    const uri = track?.info?.uri || track?.info?.identifier;
+    const title = track?.info?.title;
+    if (!userId || !uri || !title) return null;
     const res = stmts.addFavorite.run(
       userId,
-      track.info.uri || track.info.identifier,
-      track.info.title,
-      track.info.author || "",
-      track.info.duration || 0,
-      track.info.artworkUrl || "",
-      track.info.sourceName || "audio",
+      uri,
+      title,
+      track.info?.author || "",
+      track.info?.duration || 0,
+      track.info?.artworkUrl || "",
+      track.info?.sourceName || "audio",
       Date.now()
     );
     scheduleExport();

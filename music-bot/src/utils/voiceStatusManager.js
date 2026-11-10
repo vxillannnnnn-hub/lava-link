@@ -150,7 +150,7 @@ function formatIdleStatus(template, guildId = null) {
  * @returns {string}
  */
 function formatStatusString(template, track) {
-  if (!track || !track.info) return "";
+  if (!track || !track.info || typeof template !== "string") return "";
 
   const { title: cleanTitle, author: cleanAuthor } = cleanArtistAndTitle(
     track.info.title,
@@ -292,7 +292,13 @@ function startRotation(client, player, track) {
   // Clear any existing rotation or idle timer for this voice channel
   stopRotation(voiceChannelId);
 
-  const templates = config.voiceStatus?.templates || DEFAULT_TEMPLATES;
+  // An explicitly empty template list must not become a modulo-by-zero
+  // (index NaN -> undefined -> template.replace throws in the interval).
+  const configuredTemplates = config.voiceStatus?.templates;
+  const templates =
+    Array.isArray(configuredTemplates) && configuredTemplates.length > 0
+      ? configuredTemplates
+      : DEFAULT_TEMPLATES;
   let currentIndex = templateIndices.get(voiceChannelId) || 0;
 
   // Immediately render and apply the active template with priority = true
@@ -429,7 +435,11 @@ function setIdleVoiceStatus(client, voiceChannelId, guildId) {
   // Clear any existing rotation or idle timer for this voice channel
   stopRotation(voiceChannelId);
 
-  const idleTemplates = config.voiceStatus?.idleTemplates || DEFAULT_IDLE_TEMPLATES;
+  const configuredIdleTemplates = config.voiceStatus?.idleTemplates;
+  const idleTemplates =
+    Array.isArray(configuredIdleTemplates) && configuredIdleTemplates.length > 0
+      ? configuredIdleTemplates
+      : DEFAULT_IDLE_TEMPLATES;
   let currentIndex = idleTemplateIndices.get(voiceChannelId) ?? Math.floor(Math.random() * idleTemplates.length);
   idleTemplateIndices.set(voiceChannelId, currentIndex);
 

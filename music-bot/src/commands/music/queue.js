@@ -68,7 +68,7 @@ module.exports = {
 
     const theme = getPlatformTheme(currentTrack?.info?.sourceName);
 
-    function generateQueueEmbed(page) {
+    function generateQueueEmbed(page, pageCount = totalPages) {
       const startIdx = (page - 1) * tracksPerPage;
       const pageTracks = tracks.slice(startIdx, startIdx + tracksPerPage);
       const totalQueueDuration = tracks.reduce((acc, t) => acc + (t.info.duration || 0), 0);
@@ -80,7 +80,7 @@ module.exports = {
           iconURL: theme.icon,
         })
         .setFooter({
-          text: `Page ${page}/${totalPages} • Total: ${tracks.length} track(s) [${formatDuration(totalQueueDuration)}]`,
+          text: `Page ${page}/${pageCount} • Total: ${tracks.length} track(s) [${formatDuration(totalQueueDuration)}]`,
         })
         .setTimestamp();
 
@@ -133,7 +133,7 @@ module.exports = {
       return embed;
     }
 
-    function generateButtons(page) {
+    function generateButtons(page, pageCount = totalPages) {
       return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("queue_first")
@@ -151,12 +151,12 @@ module.exports = {
           .setEmoji(emojis.skip)
           .setLabel("Next")
           .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page === totalPages),
+          .setDisabled(page === pageCount),
         new ButtonBuilder()
           .setCustomId("queue_last")
           .setEmoji(emojis.skip)
           .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page === totalPages)
+          .setDisabled(page === pageCount)
       );
     }
 
@@ -189,14 +189,18 @@ module.exports = {
         });
       }
 
+      // The queue can grow or shrink during the 2-minute collector, so the page
+      // count captured when the command ran would otherwise point past the end.
+      const liveTotalPages = Math.max(1, Math.ceil(tracks.length / tracksPerPage));
       if (i.customId === "queue_first") currentPage = 1;
       else if (i.customId === "queue_prev") currentPage = Math.max(1, currentPage - 1);
-      else if (i.customId === "queue_next") currentPage = Math.min(totalPages, currentPage + 1);
-      else if (i.customId === "queue_last") currentPage = totalPages;
+      else if (i.customId === "queue_next") currentPage = Math.min(liveTotalPages, currentPage + 1);
+      else if (i.customId === "queue_last") currentPage = liveTotalPages;
+      currentPage = Math.min(currentPage, liveTotalPages);
 
       await i.update({
-        embeds: [generateQueueEmbed(currentPage)],
-        components: [generateButtons(currentPage)],
+        embeds: [generateQueueEmbed(currentPage, liveTotalPages)],
+        components: [generateButtons(currentPage, liveTotalPages)],
         allowedMentions: { parse: [], users: [] },
       });
     });
