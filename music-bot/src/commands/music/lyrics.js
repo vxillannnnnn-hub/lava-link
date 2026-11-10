@@ -53,7 +53,11 @@ async function fetchLyrics(player, queryTitle, queryAuthor) {
       artist_name: queryAuthor || "",
     });
 
-    const resp = await fetch(`https://lrclib.net/api/get?${searchParams.toString()}`);
+    // LRCLIB has no SLA: without a deadline a slow response would leave the
+    // deferred interaction hanging until Discord expires it.
+    const resp = await fetch(`https://lrclib.net/api/get?${searchParams.toString()}`, {
+      signal: AbortSignal.timeout(8000),
+    });
     if (resp.ok) {
       const data = await resp.json();
       if (data.syncedLyrics) {

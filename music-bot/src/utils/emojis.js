@@ -478,11 +478,16 @@ const emojis = {
    * Helper to build progress bar with custom Discord server emojis or clean Unicode fallback
    */
   createProgressBar(current, total, size = 12) {
-    if (!total || total === 0 || isNaN(total) || total === Infinity) {
+    const safeTotal = Number(total);
+    if (!Number.isFinite(safeTotal) || safeTotal <= 0) {
       return `${proxyEmojis.live} \`[LIVE STREAM]\``;
     }
-    const clampedCurrent = Math.min(Math.max(current, 0), total);
-    const progress = Math.min(Math.max(clampedCurrent / total, 0), 1);
+    // A missing position (fresh player, malformed track) must render as an
+    // empty bar; NaN used to produce a broken/garbled bar of repeats.
+    const safeCurrent = Number.isFinite(Number(current)) ? Number(current) : 0;
+    size = Math.max(1, Math.min(20, Math.round(Number(size)) || 12));
+    const clampedCurrent = Math.min(Math.max(safeCurrent, 0), safeTotal);
+    const progress = Math.min(Math.max(clampedCurrent / safeTotal, 0), 1);
     const filledBlocks = Math.round(progress * size);
 
     const bar_lf = proxyEmojis.bar_lf;

@@ -133,14 +133,18 @@ async function handleSongRequestMessage(message, client) {
     const member =
       message.member ||
       (await message.guild.members.fetch(message.author.id).catch(() => null));
+    // The member can stay null (uncached, fetch failed) while the voice state
+    // still names a channel, so never dereference member.user below.
+    const requester = member?.user || message.author;
     const voiceState = message.guild.voiceStates.cache.get(message.author.id);
     const voiceChannel =
       member?.voice?.channel ||
       (voiceState?.channelId
-        ? message.guild.channels.cache.get(voiceState.channelId)
+        ? message.guild.channels.cache.get(voiceState.channelId) ||
+          (await message.guild.channels.fetch(voiceState.channelId).catch(() => null))
         : null);
 
-    if (!voiceChannel) {
+    if (!voiceChannel || typeof voiceChannel.permissionsFor !== "function") {
       const reply = await message.channel.send({
         content: `${emojis.warn} ${message.author}, you must be connected to a voice channel to request songs!`,
       }).catch(() => null);
@@ -172,11 +176,22 @@ async function handleSongRequestMessage(message, client) {
     }
 
     if (!player.connected) {
-      await player.connect();
+      try {
+        await player.connect();
+      } catch (err) {
+        // Outside the search try/catch: a refused voice join used to reject the
+        // whole handler after the user's message was already deleted.
+        logger.error(`[RequestChannel] Voice connect failed in guild ${message.guild.id}:`, err?.message || err);
+        const reply = await message.channel.send({
+          content: `${emojis.cross} ${message.author}, I could not join <#${voiceChannel.id}>. Please try again.`,
+        }).catch(() => null);
+        if (reply) setTimeout(() => reply.delete().catch(() => {}), 6000);
+        return true;
+      }
     }
 
     try {
-      const res = await player.search({ query }, member.user);
+      const res = await player.search({ query }, requester);
 
       if (!res || !res.tracks || res.tracks.length === 0) {
         const reply = await message.channel.send({
@@ -196,7 +211,7 @@ async function handleSongRequestMessage(message, client) {
       }
 
       if (res.loadType === "playlist") {
-        const playlistTracks = await audioQuality.ensureFullQualityTracks(player, res.tracks, member.user);
+        const playlistTracks = await audioQuality.ensureFullQualityTracks(player, res.tracks, requester);
         const queued = playlistTracks.slice(0, capacity);
         player.queue.add(queued);
         const cappedNote = playlistTracks.length > queued.length ? ` Queue cap reached at ${config.player.maxQueueSize}.` : "";
@@ -205,7 +220,7 @@ async function handleSongRequestMessage(message, client) {
         }).catch(() => null);
         if (reply) setTimeout(() => reply.delete().catch(() => {}), 4000);
       } else {
-        const track = await audioQuality.ensureFullQualityTrack(player, res.tracks[0], member.user);
+        const track = await audioQuality.ensureFullQualityTrack(player, res.tracks[0], requester);
         player.queue.add(track);
         const reply = await message.channel.send({
           content: `${emojis.check} Added **${truncate(track.info.title, 45)}** to the queue.`,

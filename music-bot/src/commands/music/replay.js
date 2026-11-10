@@ -25,7 +25,13 @@ module.exports = {
       return interaction.reply(errorText("This track does not support seeking or replay."));
     }
 
-    await player.seek(0);
+    // seek() is a node round-trip; a dead node must still produce a reply.
+    try {
+      await player.seek(0);
+    } catch (err) {
+      return interaction.reply(errorText(`Could not restart the track: \`${err?.message || err}\``));
+    }
+
     const title = truncate(cleanTrackTitle(player.queue.current.info.title), 40);
 
     return interaction.reply(

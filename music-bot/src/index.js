@@ -52,8 +52,14 @@ const cleanup = async (signal) => {
 process.once("SIGINT", () => cleanup("SIGINT"));
 process.once("SIGTERM", () => cleanup("SIGTERM"));
 
-// Schedule graceful 5.5-hour handoff (330 minutes)
-const lifetimeMs = parseInt(process.env.RUNNER_LIFETIME_MS || "19800000", 10);
+// Schedule graceful 5.5-hour handoff (330 minutes). A malformed value must not
+// become NaN: setTimeout(NaN) fires on the next tick and restarts the runner in
+// a tight loop.
+const configuredLifetimeMs = parseInt(process.env.RUNNER_LIFETIME_MS || "", 10);
+const lifetimeMs =
+  Number.isFinite(configuredLifetimeMs) && configuredLifetimeMs >= 60000
+    ? configuredLifetimeMs
+    : 19800000;
 const handoffTimer = setTimeout(() => {
   logger.info("[Runner] 5.5-hour scheduled handoff reached. Gracefully initiating handover...");
   cleanup("HANDOFF");

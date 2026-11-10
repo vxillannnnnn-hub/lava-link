@@ -265,6 +265,11 @@ function initLavalink(client) {
 
     // A track started: the inactivity countdown no longer applies.
     idleLeave.cancel(player);
+
+    // Votes belong to the track they were cast on. Without this reset a vote
+    // from the previous song carried over and the next one could skip after a
+    // single click.
+    player.set("voteskips", new Set());
     player.set("autoPaused", false);
     player.set("voteskips", new Set()); // votes never carry over to the next track
 

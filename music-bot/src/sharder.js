@@ -110,8 +110,13 @@ if (tokens.length > 1) {
   process.once("SIGINT", () => cleanup("SIGINT"));
   process.once("SIGTERM", () => cleanup("SIGTERM"));
 
-  // Schedule graceful 5.5-hour handoff (330 minutes)
-  const lifetimeMs = parseInt(process.env.RUNNER_LIFETIME_MS || "19800000", 10);
+  // Schedule graceful 5.5-hour handoff (330 minutes). Guard against NaN, which
+  // would make setTimeout fire immediately and restart the fleet.
+  const configuredLifetimeMs = parseInt(process.env.RUNNER_LIFETIME_MS || "", 10);
+  const lifetimeMs =
+    Number.isFinite(configuredLifetimeMs) && configuredLifetimeMs >= 60000
+      ? configuredLifetimeMs
+      : 19800000;
   const handoffTimer = setTimeout(() => {
     logger.info("[Fleet] 5.5-hour runner handoff reached. Initiating graceful handover...");
     cleanup("HANDOFF");
@@ -144,9 +149,13 @@ if (tokens.length > 1) {
 // -----------------------------------------------------------------------------
 else if (process.env.ENABLE_SHARDING === "true") {
   const token = tokens[0];
-  const totalShards = process.env.SHARDS_TOTAL === "auto" || !process.env.SHARDS_TOTAL
-    ? "auto"
-    : parseInt(process.env.SHARDS_TOTAL, 10);
+  const requestedShards = parseInt(process.env.SHARDS_TOTAL || "", 10);
+  const totalShards =
+    process.env.SHARDS_TOTAL === "auto" || !process.env.SHARDS_TOTAL
+      ? "auto"
+      : Number.isFinite(requestedShards) && requestedShards > 0
+        ? requestedShards
+        : "auto";
 
   logger.info(`Initializing ShardingManager with mode: process (totalShards: ${totalShards})...`);
 

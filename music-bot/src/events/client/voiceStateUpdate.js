@@ -57,6 +57,13 @@ module.exports = {
       if (oldState.id === client.user?.id && newState.channelId && oldState.channelId && oldState.channelId !== newState.channelId) {
         const voiceStatusManager = require("../../utils/voiceStatusManager");
         voiceStatusManager.clearVoiceStatus(client, oldState.channelId, guildId);
+        // Keep our bookkeeping in step with an admin move: the empty-channel
+        // guard counts listeners in player.voiceChannelId, and a stale id made
+        // it pause and arm a leave for the channel we had already left.
+        if (player && newState.channelId) {
+          player.voiceChannelId = newState.channelId;
+          player.set("lastVoiceChannelId", newState.channelId);
+        }
         if (player && player.playing && !player.paused && player.queue.current) {
           voiceStatusManager.onTrackStart(client, player, player.queue.current);
         } else if (player && (!player.queue?.current && !player.playing)) {

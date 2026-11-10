@@ -11,6 +11,11 @@ module.exports = {
     // 1. Slash Command Autocomplete Handling
     // -------------------------------------------------------------------------
     if (interaction.isAutocomplete()) {
+      // Autocomplete can arrive in a DM, where there is no guild or player.
+      if (!interaction.inGuild()) {
+        await interaction.respond([]).catch(() => {});
+        return;
+      }
       const command = client.commands.get(interaction.commandName);
       if (command && typeof command.autocomplete === "function") {
         try {
@@ -89,6 +94,14 @@ module.exports = {
       const command = client.commands.get(interaction.commandName);
       if (!command) {
         return interaction.reply(errorText(`Command \`/${interaction.commandName}\` does not exist.`));
+      }
+
+      // Slash commands are guild-scoped: a DM has no guild, member or voice
+      // state, so every music handler would dereference null.
+      if (!interaction.inGuild()) {
+        return interaction.reply(
+          errorText("This command only works inside a server.", "Invite the bot to your server and try again.")
+        );
       }
 
       // Voice channel checks for music playback/control commands (excludes non-voice management/informational commands, 247, and join)

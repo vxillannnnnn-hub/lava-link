@@ -32,38 +32,35 @@ function formatDuration(ms) {
  * @returns {number|null}
  */
 function parseDuration(str) {
-  if (!str && str !== 0) return null;
-  str = String(str).trim().toLowerCase();
+  if (str === null || str === undefined) return null;
+  const raw = String(str).trim().toLowerCase();
+  if (!raw) return null;
 
-  // If pure digits, treat as seconds
-  if (/^\d+$/.test(str)) {
-    return parseInt(str, 10) * 1000;
+  // Pure digits = seconds.
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10) * 1000;
+
+  // mm:ss or hh:mm:ss. Every part must be a plain number: parseInt would turn
+  // "1:2x" into 1:2 and silently accept garbage.
+  if (raw.includes(":")) {
+    const parts = raw.split(":");
+    if (parts.length < 2 || parts.length > 3) return null;
+    if (parts.some((part) => !/^\d+$/.test(part))) return null;
+    const [a, b, c] = parts.map((part) => parseInt(part, 10));
+    return parts.length === 2 ? (a * 60 + b) * 1000 : (a * 3600 + b * 60 + c) * 1000;
   }
 
-  // If formatted like mm:ss or hh:mm:ss
-  if (str.includes(":")) {
-    const parts = str.split(":").map((p) => parseInt(p, 10));
-    if (parts.some((p) => isNaN(p) || p < 0)) return null;
-    if (parts.length === 2) {
-      return (parts[0] * 60 + parts[1]) * 1000;
-    }
-    if (parts.length === 3) {
-      return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
-    }
-  }
+  // Units: 1h, 2m30s, 1.5m, 90s. The whole string must be consumed so decimals
+  // are not misread ("1.5m" used to match "5m") and junk like "abc1m" is
+  // rejected instead of becoming a minute.
+  const match = raw.match(
+    /^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?$/
+  );
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
 
-  // If formatted with units: 1h, 2m, 30s
-  let totalMs = 0;
-  let hasUnit = false;
-  const matchHours = str.match(/(\d+)\s*h/);
-  const matchMinutes = str.match(/(\d+)\s*m/);
-  const matchSeconds = str.match(/(\d+)\s*s/);
-
-  if (matchHours) { totalMs += parseInt(matchHours[1], 10) * 3600 * 1000; hasUnit = true; }
-  if (matchMinutes) { totalMs += parseInt(matchMinutes[1], 10) * 60 * 1000; hasUnit = true; }
-  if (matchSeconds) { totalMs += parseInt(matchSeconds[1], 10) * 1000; hasUnit = true; }
-
-  return hasUnit ? totalMs : null;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3] || 0);
+  return Math.round((hours * 3600 + minutes * 60 + seconds) * 1000);
 }
 
 /**

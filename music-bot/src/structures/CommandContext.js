@@ -11,6 +11,19 @@ const SUBCOMMANDS = {
 };
 
 /**
+ * Default subcommand per command for the bare prefix form (`.dj`, `.playlist`).
+ * Previously every command got "view", which only exists on `settings`, so
+ * `.dj` fell through every branch and replied with nothing.
+ */
+const DEFAULT_SUBCOMMANDS = {
+  playlist: "list",
+  dj: "status",
+  autoplay: "toggle",
+  settings: "view",
+  config: "view",
+};
+
+/**
  * Unified Command Context Adapter
  * Bridges Discord Slash Commands (ChatInputCommandInteraction) and Prefix Message Commands
  * into a single unified API, allowing 100% code reusability without duplicating command files.
@@ -51,7 +64,7 @@ class CommandContext {
       this.options = {
         getSubcommand: (required = false) => {
           if (!this.args || this.args.length === 0) {
-            if (required) return "view";
+            if (required) return DEFAULT_SUBCOMMANDS[commandName?.toLowerCase()] || null;
             return null;
           }
           const candidate = this.args[0].toLowerCase();
@@ -79,21 +92,18 @@ class CommandContext {
 
         getInteger: (name) => {
           if (!effectiveArgs || effectiveArgs.length === 0) return null;
-          if (name === "from" || name === "first") {
-            const val = parseInt(effectiveArgs[0], 10);
-            return isNaN(val) ? null : val;
-          }
-          if (name === "to" || name === "second") {
-            const targetStr = effectiveArgs.length > 1 ? effectiveArgs[1] : effectiveArgs[0];
-            const val = parseInt(targetStr, 10);
-            return isNaN(val) ? null : val;
-          }
-          if (name === "level" || name === "position") {
-            const val = parseInt(effectiveArgs[0], 10);
-            return isNaN(val) ? null : val;
-          }
-          const val = parseInt(effectiveArgs[0], 10);
-          return isNaN(val) ? null : val;
+          // "to"/"second" address the second positional argument, everything
+          // else the first. parseInt alone accepted "5abc" as 5 and "1.9" as 1
+          // (so `.remove 2abc` deleted a track), so the token must be an integer.
+          const token =
+            name === "to" || name === "second"
+              ? effectiveArgs[1] ?? effectiveArgs[0]
+              : effectiveArgs[0];
+          if (token === undefined || token === null) return null;
+          const text = String(token).trim();
+          if (!/^[+-]?\d+$/.test(text)) return null;
+          const val = Number(text);
+          return Number.isSafeInteger(val) ? val : null;
         },
 
         getNumber: (name) => {

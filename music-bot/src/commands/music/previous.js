@@ -32,15 +32,22 @@ module.exports = {
 
     // Keep the interrupted song so the listener can return to it.
     const interruptedTrack = player.queue.current;
+    try {
+      await player.play({ track: previousTrack });
+      if (
+        interruptedTrack &&
+        interruptedTrack.info?.identifier !== previousTrack.info?.identifier
+      ) {
+        player.queue.add(interruptedTrack, 0);
+      }
+    } catch (err) {
+      // The interaction is already deferred, so an unhandled throw would leave
+      // the user with a permanently blank "thinking" reply.
+      return interaction.editReply(errorText(`Could not play the previous track: \`${err?.message || err}\``));
+    }
+
     const voiceStatusManager = require("../../utils/voiceStatusManager");
     voiceStatusManager.onTrackStart(client, player, previousTrack);
-    await player.play({ track: previousTrack });
-    if (
-      interruptedTrack &&
-      interruptedTrack.info?.identifier !== previousTrack.info?.identifier
-    ) {
-      player.queue.add(interruptedTrack, 0);
-    }
     const title = truncate(cleanTrackTitle(previousTrack.info.title), 40);
     const author = truncate(previousTrack.info.author, 24);
 

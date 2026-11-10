@@ -51,7 +51,11 @@ module.exports = {
       );
     }
 
-    await player.seek(targetMs);
+    try {
+      await player.seek(targetMs);
+    } catch (err) {
+      return interaction.reply(errorText(`Seek failed: \`${err?.message || err}\``));
+    }
 
     return interaction.reply(
       actionText(

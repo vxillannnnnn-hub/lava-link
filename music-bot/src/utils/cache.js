@@ -25,15 +25,21 @@ class MemoryCache {
   }
 
   set(key, value, ttlMs = this.defaultTtlMs) {
-    if (this.store.size >= this.maxEntries) {
-      // Remove oldest entry
+    if (this.store.has(key)) {
+      // Updating a key must not evict an unrelated entry.
+      this.store.delete(key);
+    } else if (this.store.size >= this.maxEntries) {
       const firstKey = this.store.keys().next().value;
-      if (firstKey) this.store.delete(firstKey);
+      if (firstKey !== undefined) this.store.delete(firstKey);
     }
+
+    // A NaN/Infinity TTL would never expire (`Date.now() > NaN` is always false).
+    const numericTtl = Number(ttlMs);
+    const ttl = Number.isFinite(numericTtl) && numericTtl > 0 ? numericTtl : this.defaultTtlMs;
 
     this.store.set(key, {
       value,
-      expiry: Date.now() + ttlMs,
+      expiry: Date.now() + ttl,
     });
   }
 

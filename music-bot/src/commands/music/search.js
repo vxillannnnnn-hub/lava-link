@@ -12,6 +12,7 @@ const { formatDuration, truncate } = require("../../utils/formatters");
 const { getPlatformTheme, cleanTrackTitle } = require("../../utils/sourceManager");
 const { handleSearchAutocomplete } = require("../../utils/searchAutocomplete");
 const emojis = require("../../utils/emojis");
+const { queueCapacity } = require("../../utils/playerActions");
 const config = require("../../config");
 const audioQuality = require("../../utils/audioQuality");
 
@@ -138,6 +139,11 @@ module.exports = {
     const tracks = searchRes.tracks.slice(0, 10);
     const firstTheme = getPlatformTheme(tracks[0]?.info?.sourceName);
     const searchId = `${interaction.guildId}_${interaction.user.id}_${Date.now()}`;
+    // Bound the temporary map: a spammer must not be able to hold thousands of
+    // result sets in memory until their timers fire.
+    if (activeSearches.size > 100) {
+      activeSearches.delete(activeSearches.keys().next().value);
+    }
     activeSearches.set(searchId, { tracks, player, userId: interaction.user.id });
 
     // Clean up cache after 60 seconds (unref'd so it never holds the process open)
@@ -290,6 +296,14 @@ module.exports = {
       chosenTrack,
       interaction.user
     );
+    if (queueCapacity(player) <= 0) {
+      return interaction.reply({
+        content: `${emojis.warn} The queue is full (${config.player.maxQueueSize} tracks). Play or clear some tracks first.`,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [], users: [] },
+      });
+    }
+
     player.queue.add(playableTrack);
 
     if (!player.playing && !player.paused) {
