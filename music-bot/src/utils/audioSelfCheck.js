@@ -29,6 +29,26 @@ function parseSemver(value) {
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
+/**
+ * Some Lavalink builds (including the pinned koe 3.1.0 image) report the git
+ * describe string instead of a semver, e.g. "f7335760359f…-SNAPSHOT". Read the
+ * value from every shape the API uses so the label is never misleading.
+ */
+function firstVersionString(info, node) {
+  const candidates = [
+    info?.version?.semver,
+    typeof info?.version === "string" ? info.version : null,
+    info?.version?.version,
+    info?.buildVersion,
+    node?.info?.version?.semver,
+    typeof node?.info?.version === "string" ? node.info.version : null,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return "unknown";
+}
+
 function compareSemver(a, b) {
   return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 }
@@ -50,34 +70,41 @@ async function runAudioSelfCheck(client, node) {
     }
   }
 
-  const version = info?.version?.semver || node?.info?.version?.semver || "unknown";
-  const parsedVersion = parseSemver(version);
+  const rawVersion = firstVersionString(info, node);
+  const parsedVersion = parseSemver(rawVersion);
+  // Identify the build by commit as well: a hash-style version is still a
+  // known, pinned build and must not be reported as an unreadable version.
+  const commit = String(
+    info?.git?.commit || info?.version?.commit || info?.commit || (parsedVersion ? "" : rawVersion)
+  ).toLowerCase();
+  const isPatchedBuild = PATCHED_BUILD_COMMITS.some((c) => commit.startsWith(c));
+  const versionLabel = isPatchedBuild && !String(rawVersion).startsWith(KNOWN_STALL_VERSION)
+    ? `${KNOWN_STALL_VERSION}+koe-3.1.0 (${commit.slice(0, 7)})`
+    : rawVersion;
   const plugins = info?.plugins || node?.info?.plugins || [];
   const pluginNames = plugins.map((p) => `${p?.name || "unknown"}${p?.version ? `@${p.version}` : ""}`);
   const lowerPlugins = plugins.map((p) => String(p?.name || "").toLowerCase());
   const sources = (info?.sourceManagers || node?.info?.sourceManagers || []).map((s) => String(s).toLowerCase());
 
   // 1. Version / DAVE support -------------------------------------------------
-  if (!parsedVersion) {
-    warnings.push(`Could not read the node version (got "${version}"). Discord voice needs Lavalink 4.2.0+ for DAVE encryption.`);
+  if (isPatchedBuild) {
+    notes.push(
+      `Lavalink ${versionLabel} (commit ${commit.slice(0, 7)}, JVM ${info?.jvm || "?"}) is the koe 3.1.0 build - the #1222 DAVE send-path fix is active`
+    );
+  } else if (!parsedVersion) {
+    warnings.push(
+      `Node reported the version as "${rawVersion}", which is not a semver. Discord voice needs Lavalink 4.2.0+ for DAVE encryption - pin the patched image (commit ${PATCHED_BUILD_COMMITS[0]}) or a 4.2.0+ release so this can be verified.`
+    );
   } else if (compareSemver(parsedVersion, DAVE_MIN_VERSION) < 0) {
     warnings.push(
-      `Node runs Lavalink ${version}; DAVE (mandatory Discord voice encryption since March 2026) needs 4.2.0+. Audio will fail or arrive distorted.`
+      `Node runs Lavalink ${rawVersion}; DAVE (mandatory Discord voice encryption since March 2026) needs 4.2.0+. Audio will fail or arrive distorted.`
     );
-  } else if (String(version).startsWith(KNOWN_STALL_VERSION)) {
-    const commit = String(info?.git?.commit || "").toLowerCase();
-    const isPatchedBuild = PATCHED_BUILD_COMMITS.some((c) => commit.startsWith(c));
-    if (isPatchedBuild) {
-      notes.push(
-        `Lavalink ${version} (commit ${commit.slice(0, 7)}, JVM ${info?.jvm || "?"}) is the koe 3.1.0 build - the #1222 DAVE send-path fix is active`
-      );
-    } else {
-      warnings.push(
-        `Node runs Lavalink ${version}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, Lavalink issue #1222). This is the latest stable release as of 2026-11; the stall is tracked upstream at ${STALL_ISSUE_URL}.`
-      );
-    }
+  } else if (String(rawVersion).startsWith(KNOWN_STALL_VERSION)) {
+    warnings.push(
+      `Node runs Lavalink ${rawVersion}, which has a known DAVE send-path stall (100-400ms dropouts about once per second, Lavalink issue #1222). This is the latest stable release as of 2026-11; the stall is tracked upstream at ${STALL_ISSUE_URL}.`
+    );
   } else {
-    notes.push(`Lavalink ${version} supports DAVE`);
+    notes.push(`Lavalink ${rawVersion} supports DAVE`);
   }
 
   // 2. YouTube provider -------------------------------------------------------
@@ -120,7 +147,7 @@ async function runAudioSelfCheck(client, node) {
   }
 
   logger.lavalink(
-    `[AudioSelfCheck] Node "${node?.id || "unknown"}" • Lavalink ${version} • sources: ${
+    `[AudioSelfCheck] Node "${node?.id || "unknown"}" • Lavalink ${versionLabel} • sources: ${
       sources.join(", ") || "none"
     } • plugins: ${pluginNames.join(", ") || "none"}`
   );
@@ -133,7 +160,8 @@ async function runAudioSelfCheck(client, node) {
 
   const report = {
     nodeId: node?.id || null,
-    version,
+    version: versionLabel,
+    versionRaw: rawVersion,
     sources,
     plugins: pluginNames,
     cpuLoad,
