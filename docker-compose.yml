@@ -16,7 +16,7 @@ services:
       # The image entrypoint is exec-form (`java -jar ...`), so JAVA_OPTS is
       # never read. JAVA_TOOL_OPTIONS is picked up by the JVM itself.
       # -XX:+ZGenerational was removed in JDK 24; ZGC is generational by default.
-      - JAVA_TOOL_OPTIONS=-XX:+UseZGC -Xms1G -Xmx2G -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -Dio.netty.transport.noNative=false -Dio.netty.allocator.type=pooled -Dio.netty.allocator.numDirectArenas=4 -Dio.netty.recycler.maxCapacityPerThread=4096 -Dnetworkaddress.cache.ttl=300 -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true -Djdk.net.hosts.resolver=SYSTEM
+      - JAVA_TOOL_OPTIONS=-XX:+UseZGC -Xms2G -Xmx2G -XX:+AlwaysPreTouch -XX:+UseStringDeduplication -Dio.netty.transport.noNative=false -Dio.netty.allocator.type=pooled -Dio.netty.allocator.numDirectArenas=4 -Dio.netty.recycler.maxCapacityPerThread=4096 -Dnetworkaddress.cache.ttl=300 -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true -Djdk.net.hosts.resolver=SYSTEM
       - LAVALINK_SERVER_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
       - PLUGINS_YOUTUBE_OAUTH_REFRESH_TOKEN=${YOUTUBE_REFRESH_TOKEN:-}
     volumes:

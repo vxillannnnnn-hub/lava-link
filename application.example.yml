@@ -29,7 +29,7 @@ koe:
     useEpoll: true # Linux native C-epoll network transport (lowest UDP voice latency)
     useKQueue: false
     highPacketPriority: true # Real-time scheduling priority for Discord voice frames
-    bufferDurationMs: 400 # Optimized low-jitter native audio queue (ultra-low latency, zero GC stutters)
+    bufferDurationMs: 1000 # Native audio queue: a full second absorbs GC/scheduler/network spikes (adds ~0.6s latency, removes underrun crackle)
     byteBufAllocator: "pooled" # Netty pooled off-heap direct buffers
 
 lavalink:
@@ -37,20 +37,20 @@ lavalink:
     pluginsDir: "./plugins"
     server:
         password: "YOUR_LAVALINK_PASSWORD" # Change this password
-        bufferDurationMs: 400 # JDA-NAS audio queue size (ms) - optimal balance against GC pauses
+        bufferDurationMs: 1000 # JDA-NAS queue: documented remedy for audio pauses during GC/thread-scheduling spikes
         frameBufferDurationMs: 5000 # Pre-buffered frames: 5.0s prevents stuttering during internet packet loss
         playerUpdateInterval: 2
         opusEncodingQuality: 10 # Studio grade: 10 is maximum VBR Opus complexity (510 kbps ceiling)
         resamplingQuality: HIGH # Audiophile grade: band-limited sinc interpolation (zero aliasing at 48kHz)
         trackStuckThresholdMs: 8000
-        useSeekGhosting: false
+        useSeekGhosting: true # Keep reading buffered audio until the seek target is ready: no silent gap on /seek
         nonAllocatingFrameBuffer: false # Smooth frame rebuilding for volume & filter transitions
-        gcWarnings: false
+        gc-warnings: true # Log JVM pause warnings so node-side stutter is diagnosable
         koe:
             useEpoll: true
             useKQueue: false
             highPacketPriority: true
-            bufferDurationMs: 400
+            bufferDurationMs: 1000
             byteBufAllocator: "pooled"
         youtubeSearchEnabled: false # Handled via dev.lavalink.youtube
         soundcloudSearchEnabled: true

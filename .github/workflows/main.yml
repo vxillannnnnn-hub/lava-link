@@ -197,7 +197,7 @@ jobs:
             --enable-native-access=ALL-UNNAMED \
             --sun-misc-unsafe-memory-access=allow \
             -XX:+UseZGC \
-            -Xms1G \
+            -Xms2G \
             -Xmx2G \
             -XX:+AlwaysPreTouch \
             -XX:+UseStringDeduplication \
@@ -220,6 +220,10 @@ jobs:
             -jar Lavalink.jar > lavalink.log 2>&1 &
           echo "LAVALINK_PID=$!" >> $GITHUB_ENV
           echo "Lavalink PID: $!"
+          # Audio frames are deadline-bound. Bias the node above the runner's
+          # background agents and stop the kernel paging the pre-touched heap.
+          sudo renice -n -5 -p "$LAVALINK_PID" || true
+          sudo sysctl -w vm.swappiness=1 || true
 
       - name: Wait for Lavalink Ready
         if: matrix.component == 'lavalink'
