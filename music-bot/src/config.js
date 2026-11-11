@@ -107,7 +107,9 @@ module.exports = {
     // Hard cap. 384000 is Discord's own ceiling (boost tier 3).
     max: parseInt(process.env.VOICE_BITRATE_MAX || "384000", 10),
     // Never adapt below this: below it music audibly loses detail for no gain.
-    min: parseInt(process.env.VOICE_BITRATE_MIN || "64000", 10),
+    // 128kbps is the minimum for high-quality Discord music; ensures Opus passthrough
+    // when volume is 100 and no filter is active, avoiding re-encoding generation loss.
+    min: parseInt(process.env.VOICE_BITRATE_MIN || "128000", 10),
     // One adaptive step. Smaller steps are gentler but correct too slowly.
     stepDown: parseInt(process.env.VOICE_BITRATE_STEP || "64000", 10),
     // How often the governor checks every active player.
