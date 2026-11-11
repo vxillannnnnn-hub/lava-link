@@ -378,12 +378,33 @@ function initLavalink(client) {
 
   manager.on("trackError", safeAsync((player, track, payload) => emojis.runWithClient(client, async () => {
     stopRealtimeProgressLoop(player);
-    logger.error(`Track error: "${track.info.title}" in guild ${player.guildId}:`, payload.error || payload.message);
+    // Log the full Lavalink exception: the top-level `error` string alone is
+    // rarely enough to tell a transient decode hiccup from a permanently bad
+    // source, so capture severity, cause and the stack Lavalink provides.
+    const ex = payload?.exception || null;
+    const reason = ex?.message || payload?.error || payload?.message || "unknown";
+    logger.error(
+      `Track error: "${track.info.title}" in guild ${player.guildId}:`,
+      reason,
+      `| severity=${ex?.severity || "?"}`,
+      `| cause=${ex?.cause || "-"}`,
+      `| source=${track.info?.sourceName || "?"}`,
+      `| codec=${track.info?.codec || "?"}`,
+      `| uri=${track.info?.uri || "-"}`,
+    );
+    if (ex?.causeStackTrace) logger.error(`[TrackError] causeStackTrace: ${ex.causeStackTrace}`);
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
       if (channel) {
+        // Surface a compact, human-readable reason when Lavalink provides one
+        // instead of the generic "Audio decode failure" so users can tell a
+        // region/age block from a genuinely broken stream.
+        const shortReason = ex?.message && ex.message.length <= 80 ? ex.message : null;
+        const content = shortReason
+          ? `${emojis.cross} Could not play **${truncate(track.info.title, 45)}** (${shortReason}). Playing next...`
+          : `${emojis.cross} Audio decode failure for **${truncate(track.info.title, 45)}**. Playing next...`;
         channel.send({
-          content: `${emojis.cross} Audio decode failure for **${truncate(track.info.title, 45)}**. Playing next...`,
+          content,
           allowedMentions: { parse: [], users: [] },
         }).then((m) => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
       }
