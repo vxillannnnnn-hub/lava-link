@@ -116,8 +116,19 @@ jobs:
             | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
           DAVE_VERSION=$(javap -constants -cp Lavalink.jar moe.kyokobot.libdave.NativeDave 2>/dev/null \
             | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
-          DAVE_NATIVES=$(unzip -l Lavalink.jar | grep -ci 'libdave' || true)
-          DAVE_NATIVES=${DAVE_NATIVES:-0}
+          # libdave is not necessarily inside the shaded jar: upstream's image
+          # may ship the natives beside it, and koe unpacks bundled ones at
+          # runtime. Count both places, and never fail on a zero - refusing to
+          # start the node is worse than a DAVE question the running node
+          # answers itself via /v4/info and the bot's [AudioSelfCheck] line.
+          JAR_ENTRIES=$( { unzip -l Lavalink.jar 2>/dev/null || jar tf Lavalink.jar 2>/dev/null; } \
+            | grep -ci 'libdave' | tr -dc '0-9' || true )
+          JAR_ENTRIES=${JAR_ENTRIES:-0}
+          FS_ENTRIES=$(docker run --rm --entrypoint sh "$IMAGE" -c \
+            'find /opt/Lavalink /app -iname "*libdave*" 2>/dev/null' 2>/dev/null \
+            | grep -c . | tr -dc '0-9' || true)
+          FS_ENTRIES=${FS_ENTRIES:-0}
+          DAVE_NATIVES=$((10#${JAR_ENTRIES} + 10#${FS_ENTRIES}))
           MANIFEST=$(unzip -p Lavalink.jar META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' \
             | grep -iE '^(Implementation-Version|Lavaplayer-Version):' | tr '\n' ' ' || true)
 
@@ -127,7 +138,7 @@ jobs:
           echo "jar size        : ${JAR_BYTES} bytes"
           echo "koe version     : ${KOE_VERSION:-unavailable (no VERSION constant)}"
           echo "libdave version : ${DAVE_VERSION:-unavailable (no VERSION constant)}"
-          echo "libdave entries : ${DAVE_NATIVES}"
+          echo "libdave entries : ${DAVE_NATIVES} (jar ${JAR_ENTRIES}, image ${FS_ENTRIES})"
           echo "manifest        : ${MANIFEST:-none}"
 
           {
@@ -138,15 +149,14 @@ jobs:
             echo "| Digest | \`${DIGEST}\` |"
             echo "| Jar sha256 | \`${JAR_SHA}\` |"
             echo "| koe | \`${KOE_VERSION:-unknown}\` |"
-            echo "| libdave | \`${DAVE_VERSION:-unknown}\` (${DAVE_NATIVES} jar entries) |"
+            echo "| libdave | \`${DAVE_VERSION:-unknown}\` (${DAVE_NATIVES} entries: ${JAR_ENTRIES} jar, ${FS_ENTRIES} image) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ -z "${KOE_VERSION}" ]; then
             echo "::warning::Could not read a koe VERSION constant from the jar; confirm the #1222 fix by listening for 100-400ms stalls on one live track."
           fi
           if [ "${DAVE_NATIVES}" -eq 0 ]; then
-            echo "::error::This jar contains no libdave entries - DAVE voice cannot work on it."
-            exit 1
+            echo "::warning::No libdave entries in the jar or beside it; DAVE support cannot be confirmed offline. Starting the node anyway - /v4/info and the bot's [AudioSelfCheck] line are the authority, and 100-400ms stalls are the symptom to listen for."
           fi
 
       - name: Configure application.yml
