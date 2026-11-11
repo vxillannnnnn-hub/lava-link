@@ -117,8 +117,13 @@ plugins:
             TVHTML5_SIMPLY:
                 playback: true
                 searching: true
+            # WEB is SABR-gated: when YouTube answers its /player request with only
+            # SABR-gated adaptive formats, the plugin falls back to muxed itag 18,
+            # which lacks contentLength and fails to decode ("Expected decoding
+            # to halt, got: 5" / Audio decode failure at 0 ms). Keep WEB for search
+            # metadata only and let the non-SABR clients carry playback.
             WEB:
-                playback: true
+                playback: false
                 searching: true
             MWEB:
                 playback: true

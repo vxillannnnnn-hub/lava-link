@@ -207,8 +207,9 @@ plugins:
       TVHTML5_SIMPLY:
         playback: true
         searching: true
+      # WEB is SABR-gated; see the deployed application.yml for the rationale.
       WEB:
-        playback: true
+        playback: false
         searching: true
       MWEB:
         playback: true

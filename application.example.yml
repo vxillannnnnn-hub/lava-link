@@ -1,6 +1,15 @@
 # ==============================================================================
-# Lavalink v4 Configuration Template (Standalone / Zero Remote Dependencies)
+# Lavalink v4 node configuration - CANONICAL (this is the file that runs)
 # ==============================================================================
+# Read by docker-compose.yml (mounted at /opt/Lavalink/application.yml) and by
+# .github/workflows/main.yml, which only falls back to application.example.yml
+# when this file is missing.
+#
+# music-bot/lavalink/application.yml is the local-node copy and repeats every
+# audio setting in this file. Change a buffer, encoder, resampler, threshold,
+# source or filter here and change it there too, or a node tested locally will
+# not behave like the node that serves users.
+#
 # - Multi-source support: YouTube, Spotify, Deezer, JioSaavn, SoundCloud, etc.
 # - Spotify uses internal GraphQL (NO Spotify Developer App or Premium required!)
 # ==============================================================================
@@ -108,8 +117,13 @@ plugins:
             TVHTML5_SIMPLY:
                 playback: true
                 searching: true
+            # WEB is SABR-gated: when YouTube answers its /player request with only
+            # SABR-gated adaptive formats, the plugin falls back to muxed itag 18,
+            # which lacks contentLength and fails to decode ("Expected decoding
+            # to halt, got: 5" / Audio decode failure at 0 ms). Keep WEB for search
+            # metadata only and let the non-SABR clients carry playback.
             WEB:
-                playback: true
+                playback: false
                 searching: true
             MWEB:
                 playback: true
