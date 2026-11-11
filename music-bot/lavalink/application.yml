@@ -194,18 +194,19 @@ plugins:
       - WEB
       - MWEB
       - WEBEMBEDDED
+      - TV
     clientOptions:
       MUSIC:
         playback: true
         searching: true
       ANDROID_MUSIC:
-        playback: true
+        playback: false
         searching: true
       ANDROID_VR:
-        playback: true
+        playback: false
         searching: true
       TVHTML5_SIMPLY:
-        playback: true
+        playback: false
         searching: true
       # WEB is SABR-gated; see the deployed application.yml for the rationale.
       WEB:
@@ -217,6 +218,11 @@ plugins:
       WEBEMBEDDED:
         playback: true
         searching: true
+      TV:
+        playback: true
+        videoLoading: false
+        searching: false
+        playlistLoading: false
     # OAuth on the TV client is what keeps playback stable and full quality from
     # datacenter IPs. An empty refreshToken means OAuth is skipped, exactly as in
     # the deployed file before the workflow injects YOUTUBE_REFRESH_TOKEN.

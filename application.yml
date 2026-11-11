@@ -104,18 +104,23 @@ plugins:
             - WEB
             - MWEB
             - WEBEMBEDDED # Playback for age-restricted / embed-only tracks
+            - TV # OAuth-enabled client (uses the configured refreshToken); playback only
         clientOptions:
             MUSIC:
                 playback: true
                 searching: true
+            # Playback disabled on the non-OAuth clients: YouTube flags their
+            # requests as bots on datacenter IPs ("This video requires login").
+            # OAuth (configured via YOUTUBE_REFRESH_TOKEN) only authenticates
+            # the TV client, which handles playback instead.
             ANDROID_MUSIC:
-                playback: true
+                playback: false
                 searching: true
             ANDROID_VR:
-                playback: true
+                playback: false
                 searching: true
             TVHTML5_SIMPLY:
-                playback: true
+                playback: false
                 searching: true
             # WEB is SABR-gated: when YouTube answers its /player request with only
             # SABR-gated adaptive formats, the plugin falls back to muxed itag 18,
@@ -135,6 +140,14 @@ plugins:
             WEBEMBEDDED:
                 playback: true
                 searching: true
+            # TV is the OAuth-enabled playback client. It cannot load metadata
+            # (Metadata Support: None), so it is restricted to playback only and
+            # relies on the clients above to load the track first.
+            TV:
+                playback: true
+                videoLoading: false
+                searching: false
+                playlistLoading: false
         oauth:
             enabled: true
             skipInitialization: false
@@ -222,6 +235,7 @@ logging:
         com.solaceaudio: INFO
         lavalink: INFO
         moe.kyokobot.koe: INFO
+        dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
         root: INFO
     logback:
         rollingPolicy:
