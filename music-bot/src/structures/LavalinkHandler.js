@@ -396,12 +396,18 @@ function initLavalink(client) {
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
       if (channel) {
-        // Surface a compact, human-readable reason when Lavalink provides one
-        // instead of the generic "Audio decode failure" so users can tell a
-        // region/age block from a genuinely broken stream.
-        const shortReason = ex?.message && ex.message.length <= 80 ? ex.message : null;
-        const content = shortReason
-          ? `${emojis.cross} Could not play **${truncate(track.info.title, 45)}** (${shortReason}). Playing next...`
+        // Surface Lavalink's actual reason (severity/cause) so a broken stream
+        // can be told apart from a region/age/decode failure. Include severity and
+        // cause when present so the operator can diagnose without reading logs.
+        const parts = [];
+        if (ex?.severity) parts.push(`sev=${ex.severity}`);
+        if (ex?.cause) parts.push(`cause=${ex.cause}`);
+        if (ex?.message) parts.push(ex.message);
+        else if (payload?.error) parts.push(String(payload.error));
+        else if (payload?.message) parts.push(String(payload.message));
+        const detail = parts.filter(Boolean).join(" | ").slice(0, 300);
+        const content = detail
+          ? `${emojis.cross} Could not play **${truncate(track.info.title, 45)}** (${detail}). Playing next...`
           : `${emojis.cross} Audio decode failure for **${truncate(track.info.title, 45)}**. Playing next...`;
         channel.send({
           content,

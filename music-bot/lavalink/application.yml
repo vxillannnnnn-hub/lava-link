@@ -212,7 +212,7 @@ plugins:
         playback: false
         searching: true
       MWEB:
-        playback: true
+        playback: false
         searching: true
       WEBEMBEDDED:
         playback: true

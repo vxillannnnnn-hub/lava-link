@@ -125,8 +125,12 @@ plugins:
             WEB:
                 playback: false
                 searching: true
+            # MWEB and WEBEMBEDDED are also SABR-gated web clients; leaving them
+            # enabled for playback re-introduces the itag-18 fallback path that
+            # fails to decode ("Expected decoding to halt, got: 5"). Keep them
+            # for search/embed metadata only.
             MWEB:
-                playback: true
+                playback: false
                 searching: true
             WEBEMBEDDED:
                 playback: true
