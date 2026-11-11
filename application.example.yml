@@ -37,15 +37,16 @@ lavalink:
     pluginsDir: "./plugins"
     server:
         password: "YOUR_LAVALINK_PASSWORD" # Change this password
-        bufferDurationMs: 1000 # JDA-NAS queue: documented remedy for audio pauses during GC/thread-scheduling spikes
+        bufferDurationMs: 1000 # JDA-NAS queue for GC/scheduler spikes (~0.6s added latency). It cannot mask the DAVE send-path stall (#1222) - that is a koe build issue
         frameBufferDurationMs: 5000 # Pre-buffered frames: 5.0s prevents stuttering during internet packet loss
-        playerUpdateInterval: 2
-        opusEncodingQuality: 10 # Studio grade: 10 is maximum VBR Opus complexity (510 kbps ceiling)
-        resamplingQuality: HIGH # Audiophile grade: band-limited sinc interpolation (zero aliasing at 48kHz)
-        trackStuckThresholdMs: 8000
+        playerUpdateInterval: 5 # Lavalink's default. 2/s per player doubles WS traffic for nothing
+        opusEncodingQuality: 10 # Transcode-only: best VBR Opus fidelity, no effect on passthrough
+        resamplingQuality: MEDIUM # Transcode-only. HIGH costs several times the CPU per resampled player, and CPU starvation is what drops frames
+        trackStuckThresholdMs: 10000 # 10s. A lower value skips slow-starting tracks and is heard as the song cutting out
         useSeekGhosting: true # Keep reading buffered audio until the seek target is ready: no silent gap on /seek
-        nonAllocatingFrameBuffer: false # Smooth frame rebuilding for volume & filter transitions
+        nonAllocatingFrameBuffer: false # Documented default. `true` cuts allocations but makes frame rebuilding non-instantaneous, so live volume/EQ changes land late
         gc-warnings: true # Log JVM pause warnings so node-side stutter is diagnosable
+        youtubePlaylistLoadLimit: 6 # Pages of a YouTube playlist to load
         koe:
             useEpoll: true
             useKQueue: false
@@ -60,8 +61,7 @@ lavalink:
             bandcamp: true
             twitch: true
             vimeo: true
-            nico: true
-            http: true
+            http: true # (`nico` was a v3-era source and a no-op in v4 - dropped)
             local: false
         filters:
             volume: true
@@ -85,23 +85,21 @@ plugins:
         allowDirectVideoIds: true
         allowDirectPlaylistIds: true
         clients:
-            - MUSIC # High-bitrate 256kbps Opus/AAC audio master streams
+            # Opus-capable clients only. IOS / ANDROID / TV return no Opus music
+            # format, so a track loaded through them is decoded and re-encoded -
+            # the second lossy generation this whole config exists to avoid.
+            - MUSIC # The only client that understands `ytmsearch:`; 256kbps Opus master
             - ANDROID_MUSIC # Secondary high-bitrate audio client
             - ANDROID_VR # Bot-detection evasion fallback
             - TVHTML5_SIMPLY
             - WEB
-            - IOS
             - MWEB
-            - ANDROID
-            - TV
+            - WEBEMBEDDED # Playback for age-restricted / embed-only tracks
         clientOptions:
             MUSIC:
                 playback: true
                 searching: true
             ANDROID_MUSIC:
-                playback: true
-                searching: true
-            WEBEMBEDDED:
                 playback: true
                 searching: true
             ANDROID_VR:
@@ -113,16 +111,10 @@ plugins:
             WEB:
                 playback: true
                 searching: true
-            IOS:
-                playback: true
-                searching: true
             MWEB:
                 playback: true
                 searching: true
-            ANDROID:
-                playback: true
-                searching: true
-            TV:
+            WEBEMBEDDED:
                 playback: true
                 searching: true
         oauth:

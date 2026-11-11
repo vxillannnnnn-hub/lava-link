@@ -12,9 +12,15 @@ const { warnEmbed } = require("./embed");
  * a pause or a leave timer at all, and autoplay happily refilled the queue.
  *
  * This module owns the rule so every entry point agrees:
- *   - humans present            -> cancel the leave timer (and let the caller resume)
+ *   - humans present            -> cancel the leave timer, resume anything we suspended
  *   - alone, 24/7 off           -> pause now, disconnect after the grace period
- *   - alone, 24/7 on            -> stay connected but stop streaming (configurable)
+ *   - alone, 24/7 on            -> stop streaming, keep the session AND the queue
+ *
+ * 24/7 used to only *pause*, which looked safe but was not: pausing leaves the
+ * node player loaded, and lavalink-client's autoplay hand-off calls
+ * `play({ paused: false })` - so the next recommendation un-paused the player
+ * and the bot went on broadcasting to nobody. Suspending instead tears the node
+ * track down, parks the upcoming queue and restores both on the next join.
  *
  * It is fail-open: an unknown guild/channel counts as "not alone", because a
  * cache miss must never mute a channel that actually has listeners.
@@ -49,6 +55,38 @@ function countHumanListeners(client, guild, channelId) {
   return humans;
 }
 
+/**
+ * Resolve the discord.js client for a player.
+ *
+ * lavalink-client keeps NO reference to the discord.js client on the player:
+ * the only back-reference is `player.LavalinkManager`, and its `options.client`
+ * is just `{ id, username }`. Reading `player.lavalink.client` / `player.client`
+ * (as this guard used to) therefore resolved to `undefined` every single time,
+ * which made the guard fail open and let autoplay refill an abandoned channel
+ * forever. Order: explicit argument -> client attached by LavalinkHandler ->
+ * fleet lookup by application id -> AsyncLocalStorage context.
+ */
+function resolveClient(player, client) {
+  if (client) return client;
+  if (player?.client) return player.client;
+
+  const manager = player?.LavalinkManager || player?.lavalink || null;
+  if (manager?.client) return manager.client;
+
+  const appId = manager?.options?.client?.id;
+  if (appId) {
+    const multiBotCoordinator = require("./multiBotCoordinator");
+    const match = (multiBotCoordinator.clients || []).find((c) => c?.user?.id === appId);
+    if (match) return match;
+  }
+
+  try {
+    return require("./emojis").getActiveClient?.() || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function resolveGuild(client, player) {
   return client?.guilds?.cache?.get(player?.guildId) || player?.guild || null;
 }
@@ -57,11 +95,96 @@ function resolveGuild(client, player) {
  * True only when we can positively see an empty channel. A missing cache is
  * reported as "not alone" so the guard can never silence a busy channel.
  */
-function isAlone(player, client = player?.lavalink?.client || player?.client) {
+function isAlone(player, client) {
   if (!player?.voiceChannelId) return false;
-  const guild = resolveGuild(client, player);
+  const resolvedClient = resolveClient(player, client);
+  const guild = resolveGuild(resolvedClient, player);
   if (!guild?.voiceStates?.cache) return false;
-  return countHumanListeners(client, guild, player.voiceChannelId) === 0;
+  return countHumanListeners(resolvedClient, guild, player.voiceChannelId) === 0;
+}
+
+const SUSPEND_KEY = "suspended";
+
+/**
+ * Stop streaming while keeping everything needed to continue later.
+ *
+ * The node track is torn down with `stopPlaying(false, false)` (which also flips
+ * lavalink-client's internal autoplay guard). The upcoming tracks are parked
+ * first: while the queue is empty the node's TrackEnd takes the `queueEnd` path
+ * instead of auto-advancing, so the stop cannot turn into "play the next song".
+ *
+ * @returns {Promise<boolean>} whether anything was actually suspended
+ */
+async function suspendStreaming(player) {
+  if (!player?.queue) return false;
+  if (player.get?.(SUSPEND_KEY)) return false; // already suspended
+
+  const current = player.queue.current || null;
+  const upcoming = Array.from(player.queue.tracks || []);
+  if (!current && upcoming.length === 0) return false;
+
+  // Mark before stopping: trackEnd fires during the stop and must not be read as
+  // a listener skip (that would blacklist the artist) or as a queue end to announce.
+  player.set?.(SUSPEND_KEY, {
+    track: current,
+    position: Number(player.position) || 0,
+    queue: upcoming,
+  });
+  player.set?.("autoPaused", true);
+
+  if (upcoming.length) {
+    await Promise.resolve(player.queue.splice?.(0, upcoming.length)).catch(() => {});
+  }
+
+  if (typeof player.stopPlaying === "function") {
+    await player.stopPlaying(false, false).catch(() => {});
+  } else if (typeof player.pause === "function") {
+    await player.pause().catch(() => {});
+  }
+
+  return true;
+}
+
+/**
+ * Undo a suspension (or an auto-pause). Restores the parked queue first so the
+ * player has something to play even if the original track is gone.
+ *
+ * @returns {Promise<boolean>} whether playback was restarted
+ */
+async function resumeStreaming(player) {
+  const suspended = player?.get?.(SUSPEND_KEY) || null;
+
+  if (!suspended) {
+    if (!player?.paused) return false;
+    await player.resume().catch(() => {});
+    player.set?.("autoPaused", false);
+    return true;
+  }
+
+  player.set?.(SUSPEND_KEY, null);
+  player.set?.("autoPaused", false);
+
+  if (suspended.queue?.length) player.queue.add(suspended.queue);
+
+  if (!suspended.track) {
+    if (!player.playing && player.queue?.tracks?.length) await player.play().catch(() => {});
+    return true;
+  }
+
+  // Resume the exact track where it stopped. `position` must stay below the
+  // duration or lavalink-client rejects the call.
+  const duration = Number(suspended.track.info?.duration) || 0;
+  const position = Math.max(0, Math.min(suspended.position || 0, duration > 2000 ? duration - 1000 : 0));
+
+  try {
+    await player.play({ clientTrack: suspended.track, position });
+  } catch (err) {
+    logger.warn(
+      `[ListenerGuard] Could not resume the suspended track in guild ${player.guildId}: ${err?.message || err}`
+    );
+    if (!player.playing && player.queue?.tracks?.length) await player.play().catch(() => {});
+  }
+  return true;
 }
 
 function watchKey(client, guildId) {
@@ -104,41 +227,44 @@ async function notifyEmpty(client, player, channelId) {
 async function enforce(player, client, { notify = false, graceMs } = {}) {
   if (!player?.voiceChannelId || !player.guildId) return { humans: null, action: "idle" };
 
-  const guild = resolveGuild(client, player);
+  const resolvedClient = resolveClient(player, client);
+  const guild = resolveGuild(resolvedClient, player);
   if (!guild?.voiceStates?.cache) return { humans: null, action: "unknown" };
 
   const channelId = player.voiceChannelId;
-  const humans = countHumanListeners(client, guild, channelId);
-  const key = watchKey(client, player.guildId);
+  const humans = countHumanListeners(resolvedClient, guild, channelId);
+  const key = watchKey(resolvedClient, player.guildId);
 
   if (humans > 0) {
-    const cancelled = clearWatch(client, player.guildId);
+    const cancelled = clearWatch(resolvedClient, player.guildId);
     if (cancelled) {
       logger.info(
         `[ListenerGuard] Human listener(s) present (${humans}) in guild ${player.guildId}. Auto-leave cancelled.`
       );
     }
     // Resume here rather than in the caller: 24/7 never arms a leave timer, so
-    // its pause had no "cancelled" signal and stayed paused forever.
-    if (player.paused && player.get?.("autoPaused")) {
-      await player.resume().catch(() => {});
-      player.set("autoPaused", false);
-      logger.info(`[ListenerGuard] Resumed playback in guild ${player.guildId}: a listener joined.`);
-      return { humans, action: "resumed" };
+    // its suspension had no "cancelled" signal and stayed stopped forever.
+    if (player.get?.("autoPaused") || player.get?.(SUSPEND_KEY)) {
+      if (await resumeStreaming(player)) {
+        logger.info(`[ListenerGuard] Resumed playback in guild ${player.guildId}: a listener joined.`);
+        return { humans, action: "resumed" };
+      }
     }
     return { humans, action: cancelled ? "cancelled" : "listening" };
   }
 
   // Alone. 24/7 keeps the seat but must not broadcast to an empty room.
   if (player.get?.("247")) {
-    clearWatch(client, player.guildId);
-    if (config.player.pauseAloneIn247 !== false && player.playing && !player.paused) {
-      await player.pause().catch(() => {});
-      player.set("autoPaused", true);
-      logger.info(
-        `[ListenerGuard] Paused 24/7 playback in guild ${player.guildId}: channel is empty (staying connected).`
-      );
-      return { humans: 0, action: "paused-247" };
+    clearWatch(resolvedClient, player.guildId);
+    if (config.player.stopStreamingAloneIn247 !== false) {
+      const suspended = await suspendStreaming(player);
+      if (suspended) {
+        logger.info(
+          `[ListenerGuard] Stopped 24/7 streaming in guild ${player.guildId}: channel is empty ` +
+            "(staying connected, queue preserved for the next join)."
+        );
+        return { humans: 0, action: "stopped-247" };
+      }
     }
     return { humans: 0, action: "stay-247" };
   }
@@ -162,7 +288,7 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
     watches.delete(key);
     // Re-count against the channel this timer was armed for: the player may have
     // been moved since, and a stale count would disconnect an occupied channel.
-    const stillAlone = countHumanListeners(client, guild, channelId) === 0;
+    const stillAlone = countHumanListeners(resolvedClient, guild, channelId) === 0;
     if (!stillAlone) return;
     logger.info(`[ListenerGuard] Disconnecting from empty channel in guild ${player.guildId}.`);
     await Promise.resolve(player.destroy?.("Voice channel left empty")).catch(() => {});
@@ -171,7 +297,7 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
   if (typeof watch.timer.unref === "function") watch.timer.unref();
   watches.set(key, watch);
 
-  if (notify) await notifyEmpty(client, player, channelId);
+  if (notify) await notifyEmpty(resolvedClient, player, channelId);
   return { humans: 0, action: "armed" };
 }
 
@@ -192,9 +318,13 @@ async function reconcile(client) {
 
 module.exports = {
   countHumanListeners,
+  resolveClient,
   isAlone,
   enforce,
   reconcile,
   clearWatch,
+  suspendStreaming,
+  resumeStreaming,
+  SUSPEND_KEY,
   watches,
 };

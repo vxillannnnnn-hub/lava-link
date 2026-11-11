@@ -57,13 +57,13 @@ function getCategoryEmbed(category, client) {
         .addFields(
           { name: "`/filter preset: normalizer`", value: "Sound normalizer & dynamic limiter to balance audio spikes." },
           { name: "`/filter preset: 8d`", value: "Orbital 360-degree binaural spatial rotation (use headphones)." },
-          { name: "`/filter preset: bass_low / med / high`", value: "Deep low-end bass elevation up to +9dB." },
+          { name: "`/filter preset: bass_low / med / high`", value: "Low-shelf bass lift using Lavalink's full +1.0 dB-per-band ceiling (the equalizer cannot go higher)." },
           { name: "`/filter preset: nightcore`", value: "Accelerated BPM (1.15x) + elevated pitch (1.25x)." },
           { name: "`/filter preset: vaporwave`", value: "Relaxed slow chill tempo (0.85x) + deep pitch (0.80x)." },
           { name: "`/filter preset: karaoke`", value: "Center vocal frequency attenuation for sing-along." },
           { name: "`/filter preset: pop / rock`", value: "Custom tuned acoustic multi-band equalizer curves." },
           { name: "`/filter preset: reset`", value: "Restore neutral 0ms-latency direct Opus passthrough." },
-          { name: "`/volume <0-100>`", value: "Adjust playback volume (clipping-safe: 100% is unity gain / lossless passthrough)." }
+          { name: "`/volume <0-200>`", value: "Adjust playback volume. 100% is unity gain / lossless passthrough; above that the bot applies digital gain and warns that loud tracks can clip." }
         );
       break;
 

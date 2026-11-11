@@ -15,6 +15,7 @@ const audioSelfCheck = require("../utils/audioSelfCheck");
 const playerActions = require("../utils/playerActions");
 const frameMonitor = require("../utils/frameMonitor");
 const stateManager = require("../utils/stateManager");
+const listenerGuard = require("../utils/listenerGuard");
 const { reconnect247 } = require("../utils/reconnect247");
 
 // =============================================================================
@@ -175,7 +176,12 @@ function initLavalink(client) {
         autoPlayFunction: async (player, track) => {
           try {
             if (!Boolean(player.get("autoplay"))) return;
-            await autoplayManager.executeAutoplay(player, track, true);
+            // The hand-off is the last moment an abandoned channel can be
+            // protected. Enforcing here means autoplay cannot outrun the 60s
+            // reconciler: the guard pauses (or arms the leave timer) and this
+            // hook then queues nothing, instead of refilling an empty room.
+            await listenerGuard.enforce(player, client, { notify: false });
+            await autoplayManager.executeAutoplay(player, track, true, client);
           } catch (err) {
             // Never throw into the client - a throw here aborts its queue handling
             logger.warn(`[Autoplay] Hook failed in guild ${player.guildId}: ${err?.message || err}`);
@@ -187,6 +193,13 @@ function initLavalink(client) {
       maxPreviousTracks: config.player.maxPreviousTracks,
     },
   });
+
+  // lavalink-client stores only `options.client = { id, username }` and keeps no
+  // reference to the discord.js client, so `player.lavalink.client` - which the
+  // listener guard used to read - was always undefined and every empty-channel
+  // check silently failed open. Attach the real client where the guard can find
+  // it via `player.LavalinkManager.client`.
+  manager.client = client;
 
   // Metadata-only platforms are only metadata: the audio is either a 30 second
   // preview or a mirror that has to be re-encoded. YouTube Music ships Opus,
@@ -239,6 +252,14 @@ function initLavalink(client) {
 
     // Auto-reconnect all permanent 24/7 channels across all configured servers
     await reconnect247(client);
+
+    // Players only exist after the restore/reconnect above, so the startup
+    // transcode audit runs here rather than inside the self-check.
+    try {
+      await audioSelfCheck.auditTranscoding(client, node);
+    } catch (err) {
+      logger.debug(`[AudioSelfCheck] Transcode audit skipped: ${err?.message || err}`);
+    }
   }));
 
   manager.nodeManager.on("disconnect", (node, reason) => {
@@ -286,7 +307,7 @@ function initLavalink(client) {
     // Jockie-style background pre-fetch for 0ms gapless transition
     const isAutoplay = Boolean(player.get("autoplay"));
     if (isAutoplay && player.queue.tracks.length === 0) {
-      autoplayManager.prefetchAutoplay(player, track).catch(() => {});
+      autoplayManager.prefetchAutoplay(player, track, client).catch(() => {});
     } else if (player.queue.tracks.length > 0) {
       // Pre-warm the next queued track for 0ms instantaneous track transition
       audioOptimizer.preloadNextQueueTrack(player);
@@ -382,7 +403,7 @@ function initLavalink(client) {
     if (isAutoplay && !player.queue.current && !hookJustHandled) {
       const lastTrack = track || player.queue.previous[0] || player.get("lastPlayedTrack");
       if (lastTrack) {
-        const success = await autoplayManager.executeAutoplay(player, lastTrack, false);
+        const success = await autoplayManager.executeAutoplay(player, lastTrack, false, client);
         if (success) {
           logger.info(`[Jockie Autoplay] QueueEnd fallback resumed playback for guild ${player.guildId}`);
           return;
@@ -393,6 +414,12 @@ function initLavalink(client) {
     // Autoplay already queued the next track: trackStart owns the dashboard,
     // voice status and presence from here, so do not tear them down.
     if (player.queue.current || player.queue.tracks.length > 0) return;
+
+    // 24/7 suspended because the channel is empty: trackEnd already reset the
+    // voice status and presence, and announcing "queue finished" every time the
+    // room empties is noise. listenerGuard.resumeStreaming() restores the queue
+    // and the exact position on the next join.
+    if (player.get("suspended")) return;
 
     // Reset dedicated song request channel dashboard to ready state
     player.set("ownerId", null);

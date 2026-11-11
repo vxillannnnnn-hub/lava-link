@@ -7,14 +7,16 @@ const volumeManager = require("../../utils/volumeManager");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("volume")
-    .setDescription("View or adjust the playback volume (0% to 100%, clipping-safe)")
+    .setDescription("View or adjust the playback volume (100% = unity gain, up to the bonus ceiling)")
     .addIntegerOption((option) =>
       option
         .setName("level")
-        .setDescription("Volume percentage between 0 and 100 (leave blank to view)")
+        .setDescription(
+          `Volume percentage between 0 and ${volumeManager.MAX_VOLUME} (above 100% adds digital gain and can clip)`
+        )
         .setRequired(false)
         .setMinValue(0)
-        .setMaxValue(volumeManager.UNITY_VOLUME)
+        .setMaxValue(volumeManager.MAX_VOLUME)
     ),
 
   async execute(interaction, client) {
@@ -33,7 +35,7 @@ module.exports = {
         actionWithButtons(
           emoji,
           `Current volume is **${currentVol}%**.`,
-          "Clipping-safe presets below — anything above 100% would saturate the Opus encoder and distort:",
+          `100% is unity gain (lossless Opus passthrough). Up to **${volumeManager.MAX_VOLUME}%** is allowed, but that is digital gain: loud tracks can clip. Presets below:`,
           [
             { customId: "pctrl_vol_50", label: "50%", emoji: emojis.volume.low, style: ButtonStyle.Secondary },
             { customId: "pctrl_vol_75", label: "75%", emoji: emojis.volume.normal, style: ButtonStyle.Secondary },
@@ -51,11 +53,9 @@ module.exports = {
     const result = await volumeManager.applyVolume(player, level);
     const emoji = emojis.getVolumeEmoji(result.applied);
 
-    const sub = result.capped
-      ? volumeManager.capNotice(result)
-      : result.applied === volumeManager.UNITY_VOLUME
-      ? "Unity gain: bit-exact Opus passthrough, zero distortion"
-      : "Attenuated level (no clipping)";
+    // `gainNotice` states the real trade-off for the requested level: unity is
+    // lossless, attenuation re-encodes, and a boost can clip.
+    const sub = volumeManager.gainNotice(result);
 
     return interaction.reply(
       actionWithButtons(emoji, `Volume set to **${result.applied}%**.`, sub, [

@@ -68,9 +68,9 @@ module.exports = {
       const seedTrack = player.queue.current || player.queue.previous[0] || player.get("lastPlayedTrack");
       if (newState && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
-          await autoplayManager.executeAutoplay(player, seedTrack, false);
+          await autoplayManager.executeAutoplay(player, seedTrack, false, client);
         } else {
-          await autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack, client);
         }
       }
 
@@ -116,7 +116,8 @@ module.exports = {
         actionText(
           emojis.autoplay,
           `Autoplay status: **${isEnabled ? "ACTIVE" : "INACTIVE"}**`,
-          `Mode: **${autoplayManager.describeMode(mode)}** • Seed: **${seedTitle}** • Pool: \`${poolSize}\` ready • History: \`${historyCount}/100\``,
+          `Mode: **${autoplayManager.describeMode(mode)}** • Signal: **${autoplayManager.describeSignal()}**\n` +
+            `Seed: **${seedTitle}** • Pool: \`${poolSize}\` ready • History: \`${historyCount}/100\``,
           { ephemeral: true }
         )
       );

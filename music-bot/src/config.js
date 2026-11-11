@@ -27,6 +27,10 @@ module.exports = {
   // Player Settings for 0ms Gapless Playback & Opus Direct Passthrough
   player: {
     defaultVolume: 100, // 100 is neutral: guarantees LavaPlayer Opus direct passthrough
+    // Ceiling for /volume. Above 100% the bot applies digital gain and warns
+    // about clipping explicitly; the node also has to re-encode (no Opus
+    // passthrough). 200% = +6 dB, which is where most masters start clipping.
+    maxVolume: parseInt(process.env.MAX_VOLUME || "200", 10),
     defaultAutoplay: process.env.DEFAULT_AUTOPLAY === "true" || false, // Starts off by default, turns on with button or command
     applyVolumeAsFilter: false, // NEVER decode to PCM if volume is 100
     autoMaximizeBitrate: process.env.AUTO_MAXIMIZE_BITRATE !== "false", // Automatically maximizes voice channel to 384kbps if permitted
@@ -39,8 +43,12 @@ module.exports = {
     inactivityTimeoutMs: parseInt(process.env.INACTIVITY_TIMEOUT_MS || "180000", 10), // 3 minutes
     emptyChannelTimeoutMs: parseInt(process.env.EMPTY_CHANNEL_TIMEOUT_MS || "120000", 10), // 2 minutes
     // 24/7 keeps the bot connected, but streaming to an empty room still costs
-    // CPU/bandwidth and looks broken. Pause instead of leaving; resume on join.
-    pauseAloneIn247: process.env.PAUSE_ALONE_IN_247 !== "false",
+    // CPU/bandwidth and looks broken. An empty channel therefore STOPS the
+    // stream (queue and position preserved, playback restarts on the next
+    // join) instead of only pausing, which autoplay could silently undo.
+    // PAUSE_ALONE_IN_247 is the legacy name and still works.
+    stopStreamingAloneIn247:
+      (process.env.STOP_ALONE_IN_247 ?? process.env.PAUSE_ALONE_IN_247 ?? "true") !== "false",
     autoReconnect: true,
     gaplessPreload: true, // Pre-resolve next track/autoplay recommendation in background
     minAutoPlayMs: parseInt(process.env.MIN_AUTOPLAY_MS || "5000", 10), // anti-spam guard between autoplay hand-offs
@@ -73,6 +81,25 @@ module.exports = {
     },
   },
 
+  // Last.fm similarity layer (see utils/autoplayManager.js)
+  // The YouTube radio knows "what YouTube plays next"; Last.fm knows "what
+  // actually sounds alike", including artists the radio never surfaces. The
+  // layer is off unless an API key is present, and autoplay falls back to the
+  // platform radio alone.
+  lastfm: {
+    enabled: Boolean(process.env.LASTFM_API_KEY),
+    apiKey: process.env.LASTFM_API_KEY || "",
+    // Overridable so the lookup can be stubbed in tests.
+    baseUrl: process.env.LASTFM_BASE_URL || "https://ws.audioscrobbler.com/2.0/",
+    limit: parseInt(process.env.LASTFM_LIMIT || "20", 10),
+    // How many similar entries are resolved into playable tracks per seed.
+    // Each one is a Lavalink search, they run in parallel and only for a seed
+    // that is not cached yet.
+    maxResolve: parseInt(process.env.LASTFM_MAX_RESOLVE || "6", 10),
+    timeoutMs: parseInt(process.env.LASTFM_TIMEOUT_MS || "4000", 10),
+    cacheTtlMs: parseInt(process.env.LASTFM_CACHE_TTL_MS || "600000", 10),
+  },
+
   // Adaptive voice-channel bitrate governor (see utils/voiceBitrateManager.js)
   voiceBitrate: {
     // Same env switch as before, so the existing workflow keeps working.
@@ -92,8 +119,18 @@ module.exports = {
     healthyWindowsForUp: parseInt(process.env.VOICE_BITRATE_UP_WINDOWS || "4", 10),
     // Ceiling on how often we may lower a channel, so it cannot oscillate.
     maxDownshiftsPerHour: parseInt(process.env.VOICE_BITRATE_MAX_DOWNSHIFTS || "2", 10),
-    // Silence in a track window that counts as audible damage.
+    // Silence in a window that counts as *audible* damage. Reporting only:
+    // /audio and the governor's log line use it, it never triggers a downshift.
     audibleSilenceMs: parseInt(process.env.VOICE_BITRATE_AUDIBLE_MS || "100", 10),
+    // A downshift needs this many degraded windows in a row, so a single 100ms
+    // hiccup (one window) never costs the channel a bitrate step.
+    badWindowsForDown: parseInt(process.env.VOICE_BITRATE_DOWN_WINDOWS || "3", 10),
+    // ...and each window must lose at least this many frames (15 = 300ms)...
+    downshiftMinDroppedFrames: parseInt(process.env.VOICE_BITRATE_DOWN_MIN_FRAMES || "15", 10),
+    // ...at this drop rate, which a 100ms blip inside a 15s window cannot reach.
+    downshiftMinDropRate: parseFloat(process.env.VOICE_BITRATE_DOWN_MIN_RATE || "1"),
+    // Windows shorter than this (frames) are skipped instead of extrapolated.
+    minWindowFrames: parseInt(process.env.VOICE_BITRATE_MIN_WINDOW_FRAMES || "100", 10),
   },
 
   // Node frame-health telemetry (see utils/frameMonitor.js)

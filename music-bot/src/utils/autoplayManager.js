@@ -49,6 +49,7 @@ const MODES = {
     label: "Radio",
     sameArtistWeight: 2.5,
     sameAlbumWeight: 1.0,
+    lastfmWeight: 2.0,
     requireSeedArtist: false,
     avoidSeedArtist: false,
   },
@@ -56,6 +57,7 @@ const MODES = {
     label: "Artist",
     sameArtistWeight: 6.0,
     sameAlbumWeight: 1.5,
+    lastfmWeight: 0, // a seed-artist catalogue is not a similarity question
     requireSeedArtist: true,
     avoidSeedArtist: false,
   },
@@ -63,6 +65,8 @@ const MODES = {
     label: "Discover",
     sameArtistWeight: -4.0,
     sameAlbumWeight: -1.0,
+    // Similarity matters most here: it is what surfaces *other* artists.
+    lastfmWeight: 2.5,
     requireSeedArtist: false,
     avoidSeedArtist: true,
   },
@@ -86,6 +90,20 @@ function normalizeArtist(value) {
   );
 }
 
+/**
+ * Human-readable artist name for a third-party API.
+ * `normalizeArtist` strips everything non-alphanumeric, which is right for
+ * comparing keys and wrong for a Last.fm query - it has to send "Daft Punk",
+ * not "daftpunk".
+ */
+function cleanArtistName(value) {
+  return String(value || "")
+    .replace(/\s*-\s*topic$/i, "")
+    .replace(/\s*vevo$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 class AutoplayManager {
   constructor(maxHistoryPerGuild = 100) {
     this.maxHistoryPerGuild = maxHistoryPerGuild;
@@ -93,6 +111,8 @@ class AutoplayManager {
     this.guildHistories = new Map();
     // Map<guildId, Map<artistKey, dislikedAt>>
     this.dislikedArtists = new Map();
+    // Map<"artist|title", { at: number, list: Array<{ name, artist, match }> }>
+    this.similarCache = new Map();
   }
 
   // ---------------------------------------------------------------------------
@@ -262,6 +282,13 @@ class AutoplayManager {
     const seedAlbum = normalizeText(seed?.info?.albumName);
     if (album && seedAlbum && album === seedAlbum) score += weights.sameAlbumWeight;
 
+    // Last.fm's 0..1 match is a real "does this sound alike" signal, so it
+    // outweighs a lucky position in the platform mix.
+    const lastfmMatch = Number(track?.lastfmMatch);
+    if (Number.isFinite(lastfmMatch) && lastfmMatch > 0) {
+      score += lastfmMatch * (weights.lastfmWeight ?? 0);
+    }
+
     // Avoid an artist run (three in a row) - but in `artist` mode the run is the
     // whole point, so the penalty is skipped there.
     if (mode !== "artist" && artist && recentArtists.includes(artist)) score -= 2.5;
@@ -288,6 +315,10 @@ class AutoplayManager {
       (player?.queue?.tracks || []).map((t) => t?.info?.identifier).filter(Boolean)
     );
     const weights = MODES[mode] || MODES.radio;
+    // A skipped artist is a hard "no". The old -4 score penalty was not enough:
+    // `pickFromPool` floors every weight at 0.05, so a disliked artist could
+    // still come back on the next hand-off.
+    const disliked = this.dislikedFor(guildId);
 
     for (const track of candidates || []) {
       const info = track?.info;
@@ -304,6 +335,7 @@ class AutoplayManager {
       if (this.isAlreadyPlayed(guildId, info.identifier, info.title)) continue;
 
       const artist = normalizeArtist(info.author);
+      if (artist && disliked.includes(artist)) continue;
       if (weights.requireSeedArtist && seedArtist && artist !== seedArtist) continue;
       if (weights.avoidSeedArtist && seedArtist && artist === seedArtist) continue;
 
@@ -358,6 +390,142 @@ class AutoplayManager {
   }
 
   /**
+   * YouTube mix URLs (`list=RD<id>`) only resolve when the seed is a real
+   * YouTube video id.
+   *
+   * The previous code required `sourceName === "youtube"`, but the playback
+   * platform is `ytmsearch`, whose sourceName is `"youtubemusic"` - so the
+   * platform radio stage never ran for normal playback and every hand-off fell
+   * through to text searches for `"<title> <artist> mix"`. That is exactly why
+   * recommendations felt random: they were search results, not a radio.
+   */
+  extractYouTubeId(track) {
+    const info = track?.info;
+    if (!info?.identifier) return null;
+    const source = String(info.sourceName || "").toLowerCase();
+    if (source !== "youtube" && source !== "youtubemusic" && source !== "youtube-music") return null;
+    return /^[A-Za-z0-9_-]{11}$/.test(info.identifier) ? info.identifier : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Last.fm similarity layer
+  // ---------------------------------------------------------------------------
+
+  isLastfmEnabled() {
+    return Boolean(config.lastfm?.enabled && config.lastfm?.apiKey) && typeof fetch === "function";
+  }
+
+  describeSignal() {
+    return this.isLastfmEnabled() ? "Last.fm similarity + YouTube radio" : "YouTube radio";
+  }
+
+  /**
+   * `track.getSimilar` for a seed track. Cached per seed so a 12-track pool only
+   * costs one API call, and a re-used seed costs none.
+   *
+   * @returns {Promise<Array<{ name: string, artist: string, match: number }>>}
+   */
+  async fetchSimilarFromLastfm(seed) {
+    const apiKey = config.lastfm?.apiKey;
+    if (!this.isLastfmEnabled() || !seed?.info) return [];
+
+    const artist = cleanArtistName(seed.info.author);
+    const title = cleanTrackTitle(seed.info.title || "") || String(seed.info.title || "");
+    if (!artist || !title) return [];
+
+    const cacheKey = `${normalizeText(artist)}|${this.normalizeTitle(title)}`;
+    const ttl = Number(config.lastfm.cacheTtlMs) || 600000;
+    const cached = this.similarCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < ttl) return cached.list;
+
+    let url;
+    try {
+      url = new URL(String(config.lastfm.baseUrl));
+    } catch (err) {
+      logger.debug(`[Autoplay] Invalid LASTFM_BASE_URL: ${err?.message || err}`);
+      return [];
+    }
+    url.searchParams.set("method", "track.getsimilar");
+    url.searchParams.set("artist", artist);
+    url.searchParams.set("track", title);
+    url.searchParams.set("api_key", apiKey);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("autocorrect", "1");
+    url.searchParams.set("limit", String(Math.min(50, Math.max(1, Number(config.lastfm.limit) || 20))));
+
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), Number(config.lastfm.timeoutMs) || 4000)
+      : null;
+    if (timer?.unref) timer.unref();
+
+    try {
+      const res = await fetch(url, {
+        signal: controller?.signal,
+        headers: { "user-agent": "pulse-music-bot" },
+      });
+      if (!res.ok) {
+        logger.debug(`[Autoplay] Last.fm responded ${res.status} for "${title}" by "${artist}".`);
+        return [];
+      }
+
+      const json = await res.json();
+      const list = (json?.similartracks?.track || [])
+        .map((entry) => ({
+          name: String(entry?.name || "").trim(),
+          artist: String(entry?.artist?.name || entry?.artist?.["#text"] || "").trim(),
+          match: Number(entry?.match) || 0,
+        }))
+        .filter((entry) => entry.name && entry.artist);
+
+      this.similarCache.set(cacheKey, { at: Date.now(), list });
+      if (this.similarCache.size > 200) {
+        this.similarCache.delete(this.similarCache.keys().next().value);
+      }
+      return list;
+    } catch (err) {
+      logger.debug(`[Autoplay] Last.fm lookup failed: ${err?.message || err}`);
+      return [];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Turn Last.fm's `{name, artist}` entries into playable tracks. Sources are
+   * searched in parallel and a same-artist hit is preferred, because the top
+   * YouTube result for "song artist" is often a cover or a lyric video.
+   */
+  async resolveLastfmTracks(player, entries, limit) {
+    const picks = [];
+    const seen = new Set();
+    for (const entry of entries || []) {
+      const key = `${normalizeArtist(entry.artist)}|${this.normalizeTitle(entry.name)}`;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      picks.push(entry);
+      if (picks.length >= limit) break;
+    }
+    if (!picks.length) return [];
+
+    const results = await Promise.allSettled(
+      picks.map(async (entry) => {
+        const tracks = await this.searchWithTimeout(player, `ytmsearch:${entry.name} ${entry.artist}`.trim());
+        const seedArtist = normalizeArtist(entry.artist);
+        return (
+          tracks.find((track) => normalizeArtist(track?.info?.author) === seedArtist) ||
+          tracks[0] ||
+          null
+        );
+      })
+    );
+
+    return results
+      .filter((result) => result.status === "fulfilled" && result.value)
+      .map((result) => result.value);
+  }
+
+  /**
    * Build a ranked pool of recommendations for a seed track.
    *
    * @param {import("lavalink-client").Player} player
@@ -373,23 +541,28 @@ class AutoplayManager {
     const kind = options.kind === "similar" ? "similar" : "autoplay";
     const title = cleanTrackTitle(seed.info.title || "");
     const author = seed.info.author || "";
-    const source = String(seed.info.sourceName || "").toLowerCase();
     const raw = [];
 
     // Stage 1: the platform's own radio. This is what Jockie/Eara are really
     // playing - a mix seeded from the track, not "songs with a similar title".
-    if (mode === "radio" || mode === "artist") {
+    if (mode === "radio") {
       try {
-        let seedId = source === "youtube" && seed.info.identifier ? seed.info.identifier : null;
-        if (!seedId && mode === "radio" && title) {
+        let seedId = this.extractYouTubeId(seed);
+        if (!seedId && title) {
+          // Metadata-only seeds (Spotify/Deezer/...) carry no YouTube id: find
+          // the same song on YouTube Music first so the mix is seeded with the
+          // right video rather than an arbitrary search hit.
           const lookup = await this.searchWithTimeout(player, `ytmsearch:${title} ${author}`.trim());
           const sameArtist = lookup.find(
-            (t) => t?.info?.identifier && normalizeArtist(t.info.author) === normalizeArtist(author)
+            (t) => this.extractYouTubeId(t) && normalizeArtist(t.info.author) === normalizeArtist(author)
           );
-          seedId = sameArtist?.info?.identifier || lookup.find((t) => t?.info?.identifier)?.info?.identifier || null;
+          seedId =
+            this.extractYouTubeId(sameArtist) ||
+            lookup.map((t) => this.extractYouTubeId(t)).find(Boolean) ||
+            null;
         }
 
-        if (seedId && mode === "radio") {
+        if (seedId) {
           raw.push(
             ...(await this.searchWithTimeout(
               player,
@@ -402,12 +575,35 @@ class AutoplayManager {
       }
     }
 
+    // Stage 1.5: Last.fm similarity. Returns *other* artists that genuinely
+    // sound alike - the signal the platform radio rarely surfaces and the only
+    // real one for `discover`. Off unless LASTFM_API_KEY is configured, and
+    // always a fast no-op when it is not (one cached call per seed otherwise).
+    let lastfmMatches = new Map();
+    if (this.isLastfmEnabled() && mode !== "artist" && title) {
+      try {
+        const similar = await this.fetchSimilarFromLastfm(seed);
+        if (similar.length) {
+          lastfmMatches = new Map(
+            similar.map((entry) => [this.normalizeTitle(entry.name), entry.match])
+          );
+          raw.push(
+            ...(await this.resolveLastfmTracks(player, similar, Number(config.lastfm.maxResolve) || 6))
+          );
+        }
+      } catch (err) {
+        logger.debug(`[Autoplay] Last.fm stage failed: ${err?.message || err}`);
+      }
+    }
+
     // Stage 2: related searches (and the whole strategy for `artist`/`discover`).
+    // No "mix"/"song" suffixes: appending those biased results towards
+    // compilations, covers and lyric videos instead of related tracks.
     if (raw.length < size && title) {
       const queries =
         mode === "artist"
-          ? [`ytmsearch:${author} mix`.trim(), `ytsearch:${author} songs`.trim()]
-          : [`ytmsearch:${title} ${author} mix`.trim(), `ytsearch:${title} ${author} song`.trim()];
+          ? [`ytmsearch:${author} mix`.trim(), `ytmsearch:${author} songs`.trim()]
+          : [`ytmsearch:${title} ${author}`.trim(), `ytmsearch:${author} radio`.trim()];
 
       const results = await Promise.allSettled(queries.map((q) => this.searchWithTimeout(player, q)));
       for (const result of results) {
@@ -416,6 +612,17 @@ class AutoplayManager {
     }
 
     const filtered = this.filterCandidates(raw, player.guildId, seed, player, mode);
+
+    // Fold the Last.fm match onto every surviving candidate by title, not by
+    // identifier: the same song can arrive from the radio and from Last.fm, and
+    // whichever object survived the dedupe must still carry the signal.
+    if (lastfmMatches.size) {
+      for (const track of filtered) {
+        const match = lastfmMatches.get(this.normalizeTitle(track?.info?.title));
+        if (match) track.lastfmMatch = match;
+      }
+    }
+
     const artistCooldown = Number(config.player.autoplayArtistCooldown) || 2;
     const recentArtists = this.recentArtists(player.guildId, artistCooldown).filter(
       (artist) => artist !== normalizeArtist(author)
@@ -436,7 +643,23 @@ class AutoplayManager {
 
     scored.sort((a, b) => b.score - a.score);
 
-    return scored.slice(0, size).map((entry) => this.stampTrack(entry.track, seed, player, kind));
+    // Diversity cap: without it a radio mix that is mostly one artist produced a
+    // pool of that one artist, and weighted-random picking turned autoplay into
+    // an artist shuffle. `artist` mode is deliberately exempt (a run of the seed
+    // artist is the whole point there).
+    const maxPerArtist = mode === "artist" ? Number.POSITIVE_INFINITY : 2;
+    const perArtist = new Map();
+    const chosen = [];
+    for (const entry of scored) {
+      const artist = normalizeArtist(entry.track?.info?.author);
+      const count = perArtist.get(artist) || 0;
+      if (artist && count >= maxPerArtist) continue;
+      if (artist) perArtist.set(artist, count + 1);
+      chosen.push(entry.track);
+      if (chosen.length >= size) break;
+    }
+
+    return chosen.map((track) => this.stampTrack(track, seed, player, kind));
   }
 
   /**
@@ -508,14 +731,18 @@ class AutoplayManager {
    * @param {"autoplay"|"similar"} kind
    */
   stampTrack(track, seed, player, kind = "autoplay") {
+    const client = listenerGuard.resolveClient(player);
     const clientUserId =
-      player?.lavalink?.client?.user?.id || player?.client?.user?.id || "autoplay";
+      client?.user?.id ||
+      player?.LavalinkManager?.options?.client?.id ||
+      player?.lavalink?.client?.user?.id ||
+      "autoplay";
 
     track.requester = {
       id: clientUserId,
       username: kind === "similar" ? "Similar" : "Autoplay",
       bot: true,
-      displayAvatarURL: () => player?.lavalink?.client?.user?.displayAvatarURL?.() || undefined,
+      displayAvatarURL: () => client?.user?.displayAvatarURL?.() || undefined,
     };
     track.isAutoplay = kind === "autoplay";
     track.isSimilar = kind === "similar";
@@ -536,10 +763,14 @@ class AutoplayManager {
    * Resolve the next pool while the current track is still playing, so the
    * hand-off at the end of the track is gapless.
    */
-  async prefetchAutoplay(player, currentTrack) {
+  async prefetchAutoplay(player, currentTrack, client) {
     if (!player || !currentTrack) return null;
     if (!Boolean(player.get("autoplay"))) return null;
     if (player.get("isAutoplayPrefetching")) return null;
+    // Nobody is listening: do not spend searches (and do not warm a pool the
+    // hand-off is going to refuse anyway). This applies to 24/7 too - it keeps
+    // the session and queue alive, but an empty channel gets no lookups.
+    if (listenerGuard.isAlone(player, client)) return null;
 
     player.set("isAutoplayPrefetching", true);
     try {
@@ -584,8 +815,13 @@ class AutoplayManager {
    *
    * Adds exactly one track from the ranked pool. In hook mode the client starts
    * it; in manual mode this method starts playback itself when the player is idle.
+   *
+   * @param {import("lavalink-client").Player} player
+   * @param {object} lastTrack
+   * @param {boolean} [isAutoPlayHook]
+   * @param {import("discord.js").Client} [client] used for the empty-channel check
    */
-  async executeAutoplay(player, lastTrack, isAutoPlayHook = false) {
+  async executeAutoplay(player, lastTrack, isAutoPlayHook = false, client = null) {
     if (!player) return false;
     if (!Boolean(player.get("autoplay"))) return false;
     if (player._autoplayRunning) return false;
@@ -593,9 +829,10 @@ class AutoplayManager {
     // Never generate a recommendation for an empty room. This was the real
     // source of endless playback: no voiceStateUpdate fires for a channel that
     // was already empty (restart, boot while alone), so the autoplay hook kept
-    // refilling the queue forever with nobody listening. 24/7 is explicit
-    // intent to keep the radio running, so it is exempt.
-    if (!player.get("247") && listenerGuard.isAlone(player)) {
+    // refilling the queue forever with nobody listening. 24/7 is no exception -
+    // it keeps the session and queue, but nothing is queued or streamed until
+    // somebody joins.
+    if (listenerGuard.isAlone(player, client)) {
       logger.debug(
         `[Autoplay] Skipped recommendation for guild ${player.guildId}: voice channel has no listeners.`
       );
@@ -652,7 +889,7 @@ class AutoplayManager {
       voiceStatusManager.onTrackStart(player.lavalink?.client, player, nextTrack);
 
       // Keep the pool topped up for the track that is about to start.
-      if (remaining.length < 3) this.prefetchAutoplay(player, nextTrack).catch(() => {});
+      if (remaining.length < 3) this.prefetchAutoplay(player, nextTrack, client).catch(() => {});
 
       if (!isAutoPlayHook && !player.playing && !player.queue.current) {
         await player.play();
@@ -679,6 +916,13 @@ class AutoplayManager {
   recordOutcome(player, track, client) {
     const startedAt = Number(player?.get?.("autoplayTrackStartedAt")) || 0;
     if (!track?.isAutoplay || !startedAt) return null;
+
+    // A guard suspension (empty channel) or an auto-pause ends the track without
+    // anyone rejecting it - that must never blacklist the artist.
+    if (player.get?.("autoPaused") || player.get?.(listenerGuard.SUSPEND_KEY)) {
+      player.set("autoplayTrackStartedAt", null);
+      return null;
+    }
 
     player.set("autoplayTrackStartedAt", null);
     const elapsedMs = Date.now() - startedAt;

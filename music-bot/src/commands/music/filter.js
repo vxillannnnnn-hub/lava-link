@@ -3,6 +3,7 @@ const { EQList } = require("lavalink-client");
 const { actionText, errorText } = require("../../utils/responses");
 const emojis = require("../../utils/emojis");
 const djManager = require("../../utils/djManager");
+const { BASS_PRESETS, describeBassPreset } = require("../../utils/eqPresets");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -79,25 +80,18 @@ module.exports = {
         );
 
       case "bass_low":
-        await player.filterManager.resetFilters();
-        if (EQList?.BassboostLow) await player.filterManager.setEQPreset(EQList.BassboostLow);
-        return interaction.reply(
-          actionText(emojis.filters.bass, "Activated **Bass Boost (Low)**.", "+3dB low-end enhancement")
-        );
-
       case "bass_med":
+      case "bass_high": {
+        // Shared preset module: the node clamps every band to +1.0 dB, so the
+        // old "+3/+6/+9 dB" captions were never what was applied. The caption
+        // is now derived from the bands that are actually sent.
+        const bassPreset = BASS_PRESETS[preset];
         await player.filterManager.resetFilters();
-        if (EQList?.BassboostMedium) await player.filterManager.setEQPreset(EQList.BassboostMedium);
+        await player.filterManager.setEQ(bassPreset.bands);
         return interaction.reply(
-          actionText(emojis.filters.bass, "Activated **Bass Boost (Medium)**.", "+6dB punchy club bass")
+          actionText(emojis.filters.bass, `Activated **${bassPreset.label}**.`, describeBassPreset(preset))
         );
-
-      case "bass_high":
-        await player.filterManager.resetFilters();
-        if (EQList?.BassboostHigh) await player.filterManager.setEQPreset(EQList.BassboostHigh);
-        return interaction.reply(
-          actionText(emojis.filters.bass, "Activated **Bass Boost (High)**.", "+9dB heavy sub-bass")
-        );
+      }
 
       case "nightcore":
         await player.filterManager.resetFilters();

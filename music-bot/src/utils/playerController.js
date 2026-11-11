@@ -18,6 +18,7 @@ const {
 } = require("./formatters");
 const { buildComponentsV2Payload } = require("./componentsV2");
 const autoplayManager = require("./autoplayManager");
+const { BASS_PRESETS, describeBassPreset } = require("./eqPresets");
 const djManager = require("./djManager");
 const db = require("../database/db");
 const emojis = require("./emojis");
@@ -784,9 +785,9 @@ async function handlePlayerButton(interaction, client) {
 
       if (newAutoplay && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
-          await autoplayManager.executeAutoplay(player, seedTrack, false);
+          await autoplayManager.executeAutoplay(player, seedTrack, false, client);
         } else {
-          await autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack, client);
         }
       }
 
@@ -918,12 +919,13 @@ async function handlePlayerButton(interaction, client) {
       return await interaction.update(buildControlDrawerPayload(player));
     }
     case "ctrl_vol_150": {
-      // Legacy button id from dashboards posted before the clipping-safe gain path
+      // Legacy button id from dashboards posted before the configurable ceiling:
+      // 150% is now a real boost, reported with its clipping warning.
       if (!checkDJ(false)) return;
       const legacyResult = await volumeManager.applyVolume(player, 150);
       await interaction.update(buildControlDrawerPayload(player));
       return interaction.followUp({
-        content: `${emojis.volumeNormal} ${volumeManager.capNotice(legacyResult)}`,
+        content: `${emojis.volumeNormal} ${volumeManager.gainNotice(legacyResult)}`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
@@ -971,9 +973,9 @@ async function handlePlayerButton(interaction, client) {
       if (newAutoplay && seedTrack) {
         if (!player.playing && player.queue.tracks.length === 0) {
           // If queue ended already, immediately start autoplaying!
-          await autoplayManager.executeAutoplay(player, seedTrack, false);
+          await autoplayManager.executeAutoplay(player, seedTrack, false, client);
         } else {
-          await autoplayManager.prefetchAutoplay(player, seedTrack);
+          await autoplayManager.prefetchAutoplay(player, seedTrack, client);
         }
       }
 
@@ -1047,7 +1049,7 @@ async function handlePlayerButton(interaction, client) {
       break;
     }
 
-    // Quick Console Handlers (all volume writes go through the clipping-safe path)
+    // Quick Console Handlers (all volume writes go through the gain path in volumeManager)
     case "pctrl_vol_50": {
       if (!checkDJ(false)) return;
       const v50 = await volumeManager.applyVolume(player, 50);
@@ -1076,7 +1078,7 @@ async function handlePlayerButton(interaction, client) {
       });
     }
     case "pctrl_vol_150": {
-      // Legacy preset: applied as a capped, clipping-safe request
+      // Legacy preset: now applies the real 150% boost with a clipping warning
       if (!checkDJ(false)) return;
       const v150 = await volumeManager.applyVolume(player, 150);
       return interaction.reply({
@@ -1087,14 +1089,11 @@ async function handlePlayerButton(interaction, client) {
     }
     case "pctrl_filter_bass": {
       if (!checkDJ(false)) return;
-      await player.filterManager.setEQ([
-        { band: 0, gain: 0.25 },
-        { band: 1, gain: 0.20 },
-        { band: 2, gain: 0.15 },
-        { band: 3, gain: 0.10 },
-      ]);
+      // Same preset the /filter command uses: 0.10-0.25 dB was inaudible, and
+      // two copies of the curve had already drifted apart.
+      await player.filterManager.setEQ(BASS_PRESETS.bass_med.bands);
       return interaction.reply({
-        content: `${emojis.filters.bass} **Bass Boost** preset applied.`,
+        content: `${emojis.filters.bass} **${BASS_PRESETS.bass_med.label}** applied — ${describeBassPreset("bass_med")}`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [], users: [] },
       });
@@ -1207,9 +1206,9 @@ async function handleFilterSelect(interaction, client) {
       break;
     case "bass":
       await player.filterManager.resetFilters();
-      await player.filterManager.setEQ([{ band: 0, gain: 0.25 }, { band: 1, gain: 0.20 }, { band: 2, gain: 0.15 }]);
-      player.set("activeFilter", "Bass Boost");
-      filterName = "Bass Boost";
+      await player.filterManager.setEQ(BASS_PRESETS.bass_med.bands);
+      player.set("activeFilter", BASS_PRESETS.bass_med.label);
+      filterName = BASS_PRESETS.bass_med.label;
       break;
     default:
       await player.filterManager.resetFilters();

@@ -4,6 +4,7 @@ const emojis = require("../../utils/emojis");
 const audioQuality = require("../../utils/audioQuality");
 const frameMonitor = require("../../utils/frameMonitor");
 const voiceBitrateManager = require("../../utils/voiceBitrateManager");
+const volumeManager = require("../../utils/volumeManager");
 const { truncate, formatDuration } = require("../../utils/formatters");
 
 // Codec-path knowledge lives in audioQuality so this command and the frame
@@ -104,7 +105,9 @@ module.exports = {
     const appliedVolume = player?.volume ?? 100;
     const volumeLine =
       Number.isFinite(Number(requestedVolume)) && Number(requestedVolume) !== appliedVolume
-        ? `**${appliedVolume}%** applied (asked for ${requestedVolume}%, capped at unity gain)`
+        ? `**${appliedVolume}%** applied (asked for ${requestedVolume}%, capped at the ${volumeManager.MAX_VOLUME}% maximum)`
+        : appliedVolume > 100
+        ? `**${appliedVolume}%** (boosted ${volumeManager.gainDb(appliedVolume)} dB — digital gain, clipping possible, no passthrough)`
         : `**${appliedVolume}%** (${appliedVolume === 100 ? "unity / passthrough" : "attenuated"})`;
 
     const selfCheck = client.audioSelfCheck;

@@ -17,6 +17,29 @@ function clampInt(value, min, max, fallback) {
   return Math.min(Math.max(Math.round(numeric), min), max);
 }
 
+function clampNum(value, min, max, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(Math.max(numeric, min), max);
+}
+
+/**
+ * Freshest frame counters for a node.
+ *
+ * `node.stats` is pushed by the node's stats task roughly once a minute, so on
+ * its own it makes every governor window a one-minute slice sampled four times.
+ * frameMonitor samples the same counters every 15s; preferring its latest sample
+ * makes the window the tick rather than a minute. Telemetry is advisory, so a
+ * missing monitor falls back to the pushed stats instead of failing.
+ */
+function latestFrameStats(node) {
+  try {
+    return require("./frameMonitor").latest?.(node?.id) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function isVoiceBased(channel) {
   return (
     channel?.type === ChannelType.GuildVoice ||
@@ -94,6 +117,14 @@ class VoiceBitrateManager {
       healthyWindowsForUp: clampInt(raw.healthyWindowsForUp, 2, 40, 4),
       maxDownshiftsPerHour: clampInt(raw.maxDownshiftsPerHour, 0, 20, 2),
       audibleSilenceMs: clampInt(raw.audibleSilenceMs, 20, 5000, 100),
+      // A downshift is a decision, not a report: it needs this many degraded
+      // windows in a row. One 100ms hiccup is a single window.
+      badWindowsForDown: clampInt(raw.badWindowsForDown, 2, 60, 3),
+      // Each of those windows must also lose real audio - 15 frames is 300ms.
+      downshiftMinDroppedFrames: clampInt(raw.downshiftMinDroppedFrames, 1, 100000, 15),
+      downshiftMinDropRate: clampNum(raw.downshiftMinDropRate, 0, 100, 1),
+      // Windows shorter than this many frames are ignored, not extrapolated.
+      minWindowFrames: clampInt(raw.minWindowFrames, 1, 10000000, 100),
     };
   }
 
@@ -111,6 +142,7 @@ class VoiceBitrateManager {
         lastHealth: null,
         downshifts: [],
         healthyWindows: 0,
+        badWindows: 0,
         failures: 0,
         lastError: null,
       };
@@ -222,17 +254,43 @@ class VoiceBitrateManager {
   readHealth(player) {
     const cfg = this.settings();
     const node = player?.node;
-    const delta = diffFrames(player?.get?.("frameBaseline"), node?.stats?.frameStats);
+    const frames = latestFrameStats(node) || node?.stats?.frameStats || null;
+
+    // The baseline is ours, under its own key. frameMonitor's `frameBaseline`
+    // runs from trackStart to trackEnd for per-track attribution, and reusing it
+    // made this window cumulative: one 100ms hiccup stayed in the delta for the
+    // rest of the track, so every tick that followed looked like a fresh
+    // failure. Advancing ours every sample means a hiccup is counted once.
+    const previous = player?.get?.("bitrateFrameBaseline") || null;
+    // Advance before returning so the next tick measures only its own slice.
+    if (frames) player?.set?.("bitrateFrameBaseline", frameCounters(frames));
+
+    const delta = diffFrames(previous, frames);
     const load = Number(node?.stats?.cpu?.lavalinkLoad);
     const nodeCpu = Number.isFinite(load) ? load : null;
 
     if (!delta) {
-      return { measured: false, audible: false, nodeCpu, transcoding: null, deficitFrames: 0, silenceMs: 0, dropRate: 0 };
+      return {
+        measured: false,
+        audible: false,
+        nodeCpu,
+        transcoding: null,
+        deficitFrames: 0,
+        nulledFrames: 0,
+        silentFrames: 0,
+        silenceMs: 0,
+        dropRate: 0,
+        windowFrames: 0,
+      };
     }
 
-    const silenceMs = delta.deficit * FRAME_MS;
+    // `deficit` is frames the node never sent; `nulled` is frames it sent as
+    // silence. Both reach the listener as gaps, and the DAVE stall in
+    // lavalink-devs/Lavalink#1222 shows up mostly in `nulled`.
+    const silentFrames = delta.deficit + delta.nulled;
+    const silenceMs = silentFrames * FRAME_MS;
     const total = delta.sent + delta.deficit;
-    const dropRate = total > 0 ? (delta.deficit / total) * 100 : 0;
+    const dropRate = total > 0 ? (silentFrames / total) * 100 : 0;
 
     let transcoding = null;
     try {
@@ -248,8 +306,11 @@ class VoiceBitrateManager {
       nodeCpu,
       transcoding,
       deficitFrames: delta.deficit,
+      nulledFrames: delta.nulled,
+      silentFrames,
       silenceMs,
       dropRate,
+      windowFrames: total,
     };
   }
 
@@ -268,10 +329,23 @@ class VoiceBitrateManager {
     const floor = Math.min(cfg.min, ceiling);
     const cooldownOk = now - state.lastAdaptAt >= cfg.adaptCooldownMs;
 
+    // A window is only degraded when it lost real audio: at least 300ms at a
+    // measurable rate, over a window long enough to mean anything. A single
+    // 100ms hiccup is 5 frames and ~0.7% of a 15s window, so it never qualifies
+    // - and even a large one-off stall still needs a run of bad windows below.
+    const degraded =
+      health.windowFrames >= cfg.minWindowFrames &&
+      (health.silentFrames ?? health.deficitFrames) >= cfg.downshiftMinDroppedFrames &&
+      health.dropRate >= cfg.downshiftMinDropRate;
+    state.badWindows = degraded ? (state.badWindows || 0) + 1 : 0;
+
     // Audio is arriving incomplete while the node has CPU to spare and is not
     // transcoding: the link is the constraint, so spend fewer bits per frame.
     const transportBound =
-      health.audible && (health.nodeCpu ?? 0) < 0.7 && health.transcoding === 0;
+      degraded &&
+      state.badWindows >= cfg.badWindowsForDown &&
+      (health.nodeCpu ?? 0) < 0.7 &&
+      health.transcoding === 0;
 
     if (transportBound) {
       state.healthyWindows = 0;
@@ -281,7 +355,7 @@ class VoiceBitrateManager {
         state.offset = Math.min(state.offset + cfg.stepDown, ceiling - floor);
         state.lastAdaptAt = now;
         state.downshifts = [...recent, now];
-        return { direction: "down", offset: state.offset, health };
+        return { direction: "down", offset: state.offset, health, windows: state.badWindows };
       }
       return null;
     }
@@ -320,10 +394,15 @@ class VoiceBitrateManager {
         const change = this.applyHealth(channel, health, cfg);
 
         if (change) {
+          const why =
+            change.direction === "down"
+              ? `${change.windows} consecutive bad window(s) ` +
+                `(${health.deficitFrames} dropped frame(s), ${health.dropRate.toFixed(1)}%, ` +
+                `~${health.silenceMs}ms silence)`
+              : `${cfg.healthyWindowsForUp} clean window(s)`;
           logger.debug(
             `[Bitrate] Guild ${player.guildId}: adaptive ${change.direction}-shift to ` +
-              `${Math.round(this.targetBitrate(channel) / 1000)}kbps after ` +
-              `${health.deficitFrames} dropped frame(s) (~${health.silenceMs}ms silence).`
+              `${Math.round(this.targetBitrate(channel) / 1000)}kbps after ${why}.`
           );
           await this.ensure(channel, client, {
             reason: `auto-adaptive ${change.direction}-shift`,

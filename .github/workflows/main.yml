@@ -57,33 +57,97 @@ jobs:
           distribution: 'temurin'
           java-version: '25'
 
-      - name: Restore Lavalink Jar (koe 3.1.0 build)
+      # The node must run a build whose koe/libdave carries the DAVE send-path
+      # fix: under DAVE the outgoing voice stream stalls 100-400ms about once a
+      # second (lavalink-devs/Lavalink#1222), heard as constant crackle. The
+      # 4.2.2 release ships koe 3.0.0-pre6 and still has it; upstream `dev` has
+      # koe/libdave updated (PR #1234 and later) and publishes that build itself.
+      #
+      # Pull upstream's own image instead of a third-party PR image: first-party,
+      # and it tracks the fix. The resolved digest is logged so every run is
+      # attributable to one immutable image. To pin instead of tracking, set the
+      # LAVALINK_IMAGE repository variable to a digest ref
+      # (ghcr.io/lavalink-devs/lavalink@sha256:...).
+      - name: Download Upstream Lavalink Node Build (koe/libdave dev)
         if: matrix.component == 'lavalink'
-        id: cache-lavalink
-        uses: actions/cache@v5
-        with:
-          path: Lavalink.jar
-          key: lavalink-pr1235-koe310-jar-v1
-
-      # PR #1235 (koe 3.0.0 -> 3.1.0, libdave 0.2.0) is not in a release yet.
-      # It serializes DAVE encryption under the session write lock (the libdave
-      # encryptor is not reentrant) and binds the DAVE manager to the active
-      # gateway connection, which fixes the 100-400ms send-path stalls tracked
-      # in lavalink-devs/Lavalink#1222 (heard as constant crackle/jitter).
-      # The jar is extracted from the PR author's published image; the image
-      # itself is Java 17, we only take the jar and run it on Java 25 below.
-      - name: Download Lavalink PR #1235 Jar (if not cached)
-        if: matrix.component == 'lavalink' && steps.cache-lavalink.outputs.cache-hit != 'true'
+        id: lavalink-image
+        env:
+          LAVALINK_IMAGE: ${{ vars.LAVALINK_IMAGE || 'ghcr.io/lavalink-devs/lavalink:dev' }}
         run: |
-          IMAGE="ghcr.io/alula/lavalink@sha256:dbe451c2602376adb7d42ad25c24aaaeb800240b9e78ecb8c405a6f51a68d9bf"
-          echo "Pulling $IMAGE ..."
-          docker pull "$IMAGE"
-          docker rm -f lavalink-extract 2>/dev/null || true
-          docker create --name lavalink-extract "$IMAGE"
-          docker cp lavalink-extract:/opt/Lavalink/Lavalink.jar ./Lavalink.jar
-          docker rm lavalink-extract
+          set -euo pipefail
+          echo "Pulling $LAVALINK_IMAGE ..."
+          docker pull "$LAVALINK_IMAGE"
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$LAVALINK_IMAGE" 2>/dev/null \
+            || docker inspect --format '{{.Id}}' "$LAVALINK_IMAGE")
+          echo "image=$LAVALINK_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Resolved image: $DIGEST"
+
+          docker rm -f lavalink-extract >/dev/null 2>&1 || true
+          docker create --name lavalink-extract "$LAVALINK_IMAGE" >/dev/null
+          JAR_PATH=""
+          for CANDIDATE in /opt/Lavalink/Lavalink.jar /app/Lavalink.jar /Lavalink.jar; do
+            if docker cp "lavalink-extract:$CANDIDATE" ./Lavalink.jar 2>/dev/null; then
+              JAR_PATH="$CANDIDATE"
+              break
+            fi
+          done
+          docker rm lavalink-extract >/dev/null
+          test -n "$JAR_PATH" || { echo "::error::No Lavalink.jar found in $LAVALINK_IMAGE"; exit 1; }
+          echo "jar=$JAR_PATH" >> "$GITHUB_OUTPUT"
+          echo "Extracted $JAR_PATH"
           ls -lh Lavalink.jar
           test "$(wc -c < Lavalink.jar)" -gt 10000000 || { echo "::error::Extracted Lavalink.jar looks invalid"; exit 1; }
+
+      # A moving `dev` tag is only trustworthy if the build is identifiable, so
+      # the jar's koe/libdave versions are read out of the shaded jar before the
+      # node starts. javap prints the compile-time constants when the build
+      # exposes them; libdave natives are always visible as jar entries.
+      - name: Log Lavalink Build Identity (koe / libdave / jar)
+        if: matrix.component == 'lavalink'
+        env:
+          IMAGE: ${{ steps.lavalink-image.outputs.image }}
+          DIGEST: ${{ steps.lavalink-image.outputs.digest }}
+        run: |
+          set -uo pipefail
+          JAR_SHA=$(sha256sum Lavalink.jar | cut -d' ' -f1)
+          JAR_BYTES=$(wc -c < Lavalink.jar)
+          KOE_VERSION=$(javap -constants -cp Lavalink.jar moe.kyokobot.koe.Koe 2>/dev/null \
+            | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+          DAVE_VERSION=$(javap -constants -cp Lavalink.jar moe.kyokobot.libdave.NativeDave 2>/dev/null \
+            | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+          DAVE_NATIVES=$(unzip -l Lavalink.jar | grep -ci 'libdave' || true)
+          DAVE_NATIVES=${DAVE_NATIVES:-0}
+          MANIFEST=$(unzip -p Lavalink.jar META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' \
+            | grep -iE '^(Implementation-Version|Lavaplayer-Version):' | tr '\n' ' ' || true)
+
+          echo "image           : ${IMAGE}"
+          echo "image digest    : ${DIGEST}"
+          echo "jar sha256      : ${JAR_SHA}"
+          echo "jar size        : ${JAR_BYTES} bytes"
+          echo "koe version     : ${KOE_VERSION:-unavailable (no VERSION constant)}"
+          echo "libdave version : ${DAVE_VERSION:-unavailable (no VERSION constant)}"
+          echo "libdave entries : ${DAVE_NATIVES}"
+          echo "manifest        : ${MANIFEST:-none}"
+
+          {
+            echo "## Lavalink node build"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Image | \`${IMAGE}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Jar sha256 | \`${JAR_SHA}\` |"
+            echo "| koe | \`${KOE_VERSION:-unknown}\` |"
+            echo "| libdave | \`${DAVE_VERSION:-unknown}\` (${DAVE_NATIVES} jar entries) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "${KOE_VERSION}" ]; then
+            echo "::warning::Could not read a koe VERSION constant from the jar; confirm the #1222 fix by listening for 100-400ms stalls on one live track."
+          fi
+          if [ "${DAVE_NATIVES}" -eq 0 ]; then
+            echo "::error::This jar contains no libdave entries - DAVE voice cannot work on it."
+            exit 1
+          fi
 
       - name: Configure application.yml
         if: matrix.component == 'lavalink'
@@ -245,6 +309,36 @@ jobs:
             tail -n 40 lavalink.log || true
             exit 1
           fi
+
+      # /v4/info is the authoritative build identity of the running node: the
+      # jar's semver is 4.2.2 on a dev build too, so branch + commit is what
+      # proves which koe/libdave the process actually loaded.
+      - name: Log Lavalink Runtime Identity (/v4/info)
+        if: matrix.component == 'lavalink'
+        run: |
+          INFO=$(curl -sS --max-time 10 -H "Authorization: ${NODE_PASSWORD}" \
+            http://127.0.0.1:4998/v4/info || true)
+          if [ -z "$INFO" ]; then
+            echo "::warning::/v4/info did not answer; skipping the identity log."
+            exit 0
+          fi
+          {
+            echo ""
+            echo "## Lavalink runtime identity"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Version | \`$(echo "$INFO" | jq -r '.version.semver // (.version | tostring)')\` |"
+            echo "| Git branch | \`$(echo "$INFO" | jq -r '.git.branch // "?"')\` |"
+            echo "| Git commit | \`$(echo "$INFO" | jq -r '(.git.commit // "?")[0:9]')\` |"
+            echo "| Lavaplayer | \`$(echo "$INFO" | jq -r '.lavaplayer // "?"')\` |"
+            echo "| JVM | \`$(echo "$INFO" | jq -r '.jvm // "?"')\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Lavalink $(echo "$INFO" | jq -r '.version.semver // (.version | tostring)')" \
+            "branch $(echo "$INFO" | jq -r '.git.branch // "?"')" \
+            "commit $(echo "$INFO" | jq -r '(.git.commit // "?")[0:9]')" \
+            "lavaplayer $(echo "$INFO" | jq -r '.lavaplayer // "?"')" \
+            "jvm $(echo "$INFO" | jq -r '.jvm // "?"')"
+          echo "plugins: $(echo "$INFO" | jq -r '[.plugins[]? | "\(.name)@\(.version)"] | join(", ")')"
 
       - name: Start Cloudflare Tunnel & Expose Lavalink (Low-Jitter HTTP/2 Transport)
         if: matrix.component == 'lavalink'

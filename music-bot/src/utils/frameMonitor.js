@@ -92,8 +92,12 @@ function classifyFrameDelta(previous, next, options = {}) {
   const delta = diffFrames(previous, next);
   if (!delta) return null;
 
+  // `deficit` is frames the node never sent; `nulled` is frames it sent as
+  // silence because no audio was ready. Both are silence reaching the listener,
+  // and under DAVE the nulled counter is the one that actually moves.
+  const silentFrames = delta.deficit + delta.nulled;
   const total = delta.sent + delta.deficit;
-  const ratePercent = total > 0 ? (delta.deficit / total) * 100 : 0;
+  const ratePercent = total > 0 ? (silentFrames / total) * 100 : 0;
   const warnFrames = Number.isFinite(options.warnFrames)
     ? options.warnFrames
     : config.audio.frameWarnDeficitFrames;
@@ -103,11 +107,12 @@ function classifyFrameDelta(previous, next, options = {}) {
 
   return {
     ...delta,
+    silentFrames,
     ratePercent,
-    silenceMs: delta.deficit * FRAME_MS,
-    // Two independent signals: enough absolute frames dropped, or a high drop
-    // rate in a low-traffic window. Either one is audible.
-    healthy: delta.deficit < warnFrames && ratePercent < warnRatePercent,
+    silenceMs: silentFrames * FRAME_MS,
+    // Two independent signals: enough absolute frames of silence, or a high
+    // silence rate in a low-traffic window. Either one is audible.
+    healthy: silentFrames < warnFrames && ratePercent < warnRatePercent,
   };
 }
 
@@ -117,7 +122,7 @@ function classifyFrameDelta(previous, next, options = {}) {
 function describeFrameDelta(delta, windowSeconds) {
   const window = Number.isFinite(windowSeconds) ? `${windowSeconds}s window` : "window";
   if (!delta) return "no frame data";
-  if (delta.deficit === 0) return `${window} clean (${delta.sent} frames sent)`;
+  if (delta.deficit === 0 && delta.nulled === 0) return `${window} clean (${delta.sent} frames sent)`;
 
   return (
     `${delta.deficit} frame(s) (~${delta.silenceMs}ms of silence) in the ${window} • ` +
@@ -400,6 +405,21 @@ function recommendFix(context) {
     };
   }
 
+  // The DAVE send path encrypts on the JVM thread instead of draining the
+  // pre-filled NAS buffer, so a periodic 100-400ms stall shows up as a sustained
+  // packet rate well under 50/s per player, with no CPU pressure and nothing
+  // transcoding (lavalink-devs/Lavalink#1222). No buffer setting can mask it.
+  const fps = Number(context.framesPerSecondPerPlayer);
+  if (Number.isFinite(fps) && fps >= 25 && fps < 46) {
+    return {
+      severity: "critical",
+      fix:
+        `The node is sending ~${fps.toFixed(0)} frames/s per player instead of 50, in bursts, while its CPU is fine and nothing is transcoding. ` +
+        "That is the DAVE send-path stall (lavalink-devs/Lavalink#1222): frames are encrypted on the JVM thread rather than drained from the NAS buffer, so no `bufferDurationMs` value hides it. " +
+        "Run a Lavalink build whose koe/libdave carries the fix (upstream `dev` after #1234) - this is a node build problem, not a bot setting.",
+    };
+  }
+
   return {
     severity: "warning",
     fix: "Nothing on the bot side is transcoding, so the gaps are the node's route to Discord (or the koe 3.0.0 DAVE stall): run the patched Lavalink build configured in application.yml and host the node in the voice region.",
@@ -508,6 +528,89 @@ class FrameMonitor {
   async read(node) {
     const { frames } = await this.readNode(node);
     return frames;
+  }
+
+  /**
+   * Measure jitter on demand: two fresh counter reads `windowMs` apart, turned
+   * into per-second rates.
+   *
+   * `/ping` needs this because the pushed `node.stats` object can be a minute
+   * old - useless for "is it crackling right now?", and a lifetime counter
+   * cannot show a periodic stall at all. `sent` is what the node actually put
+   * on the wire; `deficit` is 20ms slots it missed; `nulled` is slots it filled
+   * with silence. A healthy node sends 50 frames/s per playing player.
+   *
+   * @param {import("lavalink-client").LavalinkNode} node
+   * @param {{ windowMs?: number }} [options]
+   */
+  async sampleLiveJitter(node, { windowMs = 2000 } = {}) {
+    const window = Math.min(Math.max(num(windowMs) || 2000, 500), 10000);
+
+    const before = await this.readNode(node);
+    if (!before.frames) return { available: false, reason: "no frame counters from the node" };
+
+    const startedAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, window));
+    const after = await this.readNode(node);
+    const elapsedSeconds = Math.max(0.5, (Date.now() - startedAt) / 1000);
+
+    const delta = diffFrames(before.frames, after.frames);
+    if (!delta) return { available: false, reason: "frame counters reset while sampling" };
+
+    const playing = Math.max(0, num(after.stats?.playingPlayers ?? before.stats?.playingPlayers));
+    const expectedPerSecond = playing * (1000 / FRAME_MS);
+    const sentPerSecond = delta.sent / elapsedSeconds;
+    const droppedPerSecond = delta.deficit / elapsedSeconds;
+    const nulledPerSecond = delta.nulled / elapsedSeconds;
+
+    const total = delta.sent + delta.deficit;
+    const silentFrames = delta.deficit + delta.nulled;
+    const silenceRatePercent = total > 0 ? (silentFrames / total) * 100 : 0;
+    const warnFrames = num(config.audio.frameWarnDeficitFrames) || 2;
+    const warnRate = num(config.audio.frameWarnRatePercent) || 1;
+    const healthy = silentFrames < warnFrames && silenceRatePercent < warnRate;
+
+    // Delivered share of the 50/s-per-player budget. The DAVE send-path stall
+    // (lavalink-devs/Lavalink#1222) shows up as a sustained ~0.75, in bursts.
+    const deliveryRatio = expectedPerSecond > 0 ? sentPerSecond / expectedPerSecond : null;
+    const framesPerSecondPerPlayer = playing > 0 ? sentPerSecond / playing : null;
+    const daveSignature = Boolean(
+      playing > 0 && deliveryRatio !== null && deliveryRatio >= 0.6 && deliveryRatio < 0.92
+    );
+
+    let verdict;
+    if (playing === 0) {
+      verdict = "idle: no players on the node";
+    } else if (silentFrames === 0 && healthy) {
+      verdict = `clean: no frames lost or padded in ${elapsedSeconds.toFixed(1)}s`;
+    } else if (daveSignature) {
+      verdict =
+        `DAVE send-path pattern: ${framesPerSecondPerPlayer.toFixed(0)} frames/s per player instead of 50 ` +
+        "(lavalink-devs/Lavalink#1222)";
+    } else if (!healthy) {
+      verdict =
+        `audible gaps: ${silentFrames} frame(s) of silence (~${silentFrames * FRAME_MS}ms) in ` +
+        `${elapsedSeconds.toFixed(1)}s`;
+    } else {
+      verdict = `${silentFrames} frame(s) of silence in ${elapsedSeconds.toFixed(1)}s - below the audible threshold`;
+    }
+
+    return {
+      available: true,
+      windowMs: Math.round(elapsedSeconds * 1000),
+      playing,
+      expectedPerSecond,
+      sentPerSecond,
+      droppedPerSecond,
+      nulledPerSecond,
+      framesPerSecondPerPlayer,
+      deliveryRatio,
+      silentFrames,
+      silenceRatePercent,
+      healthy,
+      daveSignature,
+      verdict,
+    };
   }
 
   /**
@@ -755,19 +858,36 @@ class FrameMonitor {
     const startedAt = Number(player.get("frameBaselineAt")) || Date.now();
     const windowSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
     const total = delta.sent + delta.deficit;
-    const dropRatePercent = total > 0 ? (delta.deficit / total) * 100 : 0;
-    const silenceMs = delta.deficit * FRAME_MS;
+    // deficit = frames never sent, nulled = frames sent as silence. Both are
+    // audible gaps; the DAVE stall mostly moves `nulled`.
+    const silentFrames = delta.deficit + delta.nulled;
+    const dropRatePercent = total > 0 ? (silentFrames / total) * 100 : 0;
+    const silenceMs = silentFrames * FRAME_MS;
     const warnRate = num(config.audio.frameWarnRatePercent) || 1;
     const audible = silenceMs >= AUDIBLE_SILENCE_MS || dropRatePercent >= warnRate;
 
     const cpuText = nodeCpu === null ? "unknown" : `${(nodeCpu * 100).toFixed(0)}%`;
     const labels = reasons.map((reason) => reason.label).join(", ");
 
+    const silenceDetail =
+      delta.nulled > 0
+        ? `${delta.deficit} dropped + ${delta.nulled} nulled frame(s)`
+        : `${delta.deficit} dropped frame(s)`;
+
     const verdict = audible
-      ? `${delta.deficit} frame(s) (~${silenceMs} ms of silence) dropped in ${windowSeconds}s while the node ran at ${cpuText} CPU, ${base.ourTranscodingPlayers}/${base.ourPlayingPlayers} of our players were transcoding and volume was ${volume}%.`
+      ? `${silenceDetail} (~${silenceMs} ms of silence) in ${windowSeconds}s while the node ran at ${cpuText} CPU, ${base.ourTranscodingPlayers}/${base.ourPlayingPlayers} of our players were transcoding and volume was ${volume}%.`
       : passthrough
-        ? `No audible dropouts in ${windowSeconds}s (${delta.deficit} frame(s), ${dropRatePercent.toFixed(1)}%) and this track is on the bit-exact Opus path.`
+        ? `No audible dropouts in ${windowSeconds}s (${delta.deficit} dropped, ${delta.nulled} nulled, ${dropRatePercent.toFixed(1)}%) and this track is on the bit-exact Opus path.`
         : `No audible dropouts in ${windowSeconds}s, but this track is being re-encoded (${labels}).`;
+
+    // Frames per second per player: 50 is the expected rate for a 20ms frame.
+    // A sustained rate in the high 20s-40s is the DAVE stall signature.
+    const playersOnNode = Math.max(
+      1,
+      Number(playingPlayers) || Number(base.ourPlayingPlayers) || 1
+    );
+    const framesPerSecondPerPlayer =
+      windowSeconds > 0 ? delta.sent / windowSeconds / playersOnNode : null;
 
     const { severity, fix } = recommendFix({
       audible,
@@ -777,6 +897,7 @@ class FrameMonitor {
       ourPlayingPlayers: base.ourPlayingPlayers,
       ourTranscodingPlayers: base.ourTranscodingPlayers,
       correlation: base.correlation,
+      framesPerSecondPerPlayer,
     });
 
     return {
@@ -785,6 +906,9 @@ class FrameMonitor {
       windowSeconds,
       sentFrames: delta.sent,
       droppedFrames: delta.deficit,
+      nulledFrames: delta.nulled,
+      silentFrames,
+      framesPerSecondPerPlayer,
       silenceMs,
       dropRatePercent,
       audible,
