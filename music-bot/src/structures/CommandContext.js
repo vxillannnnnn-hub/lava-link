@@ -83,14 +83,18 @@ class CommandContext {
 
         getString: (name) => {
           if (!effectiveArgs || effectiveArgs.length === 0) return null;
+          // A platform token is read as the `source` option, so it must not be
+          // left inside the search query (`.play <song> ytsearch` used to search
+          // for the literal "<song> ytsearch", platform word included).
+          const sourceToken = effectiveArgs.find((a) =>
+            /^(spsearch|ytsearch|ytmsearch|scsearch|jssearch)$/i.test(a)
+          );
           // For song search queries and playlist names, preserve the entire remainder with spaces!
-          if (name === "query" || name === "name") return effectiveArgs.join(" ");
-          if (name === "source") {
-            const match = effectiveArgs.find((a) =>
-              /^(spsearch|ytsearch|ytmsearch|scsearch|jssearch)$/i.test(a)
-            );
-            return match ? match.toLowerCase() : null;
+          if (name === "query") {
+            return effectiveArgs.filter((a) => a !== sourceToken).join(" ");
           }
+          if (name === "name") return effectiveArgs.join(" ");
+          if (name === "source") return sourceToken ? sourceToken.toLowerCase() : null;
           if (name === "time" || name === "new" || name === "action" || name === "mode") return effectiveArgs[0] || null;
           return effectiveArgs.join(" ") || null;
         },

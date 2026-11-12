@@ -883,7 +883,11 @@ class AutoplayManager {
       });
       player.set("autoplayHandledAt", Date.now());
 
-      this.recordTrackPlayed(player.guildId, nextTrack.info?.identifier, nextTrack.info?.title, nextTrack.info?.author);
+      // Recording here as well as in the `trackStart` handler added the same
+      // artist twice to the recent-artists buffer, which doubled the weight of a
+      // single play in the "no three in a row" penalty. `trackStart` is the one
+      // source of truth for what has actually played; the chosen track is safe
+      // from re-picking because it was just removed from the pool.
       player.queue.add(nextTrack);
       logger.info(
         `[Autoplay/${mode}] Queued "${nextTrack.info.title}" by "${nextTrack.info.author}" in guild ${player.guildId} (seed: "${seed.info.title}", ${remaining.length} left in pool)`
