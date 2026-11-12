@@ -93,34 +93,44 @@ plugins:
         allowSearch: true
         allowDirectVideoIds: true
         allowDirectPlaylistIds: true
+        # Order follows the official youtube-source capability table
+        # (github.com/lavalink-devs/youtube-source -> "Available Clients").
+        #
+        # MUSIC is SEARCH ONLY: the table lists no Opus formats and no playback
+        # support for it. `ytmsearch:` therefore resolves metadata here and the
+        # audio stream comes from the clients below. The clients that return
+        # Opus without needing SABR are ANDROID_MUSIC, ANDROID_VR,
+        # TVHTML5_SIMPLY, WEBEMBEDDED and TV - they are what keeps the node on
+        # bit-exact Opus passthrough instead of transcoding an AAC fallback.
         clients:
-            # Opus-capable clients only. IOS / ANDROID / TV return no Opus music
-            # format, so a track loaded through them is decoded and re-encoded -
-            # the second lossy generation this whole config exists to avoid.
-            - MUSIC # The only client that understands `ytmsearch:`; 256kbps Opus master
-            - ANDROID_MUSIC # Secondary high-bitrate audio client
-            - ANDROID_VR # Bot-detection evasion fallback
-            - TVHTML5_SIMPLY
-            - WEB
-            - MWEB
-            - WEBEMBEDDED # Playback for age-restricted / embed-only tracks
-            - TV # OAuth-enabled client (uses the configured refreshToken); playback only
+            - MUSIC # `ytmsearch:` support - search only, cannot play
+            - ANDROID_MUSIC # Opus playback + full metadata
+            - ANDROID_VR # Opus playback, bot-detection fallback
+            - TVHTML5_SIMPLY # Opus playback fallback
+            - WEB # Opus formats, playback SABR-gated on this build
+            - MWEB # Opus formats, playback SABR-gated on this build
+            - WEBEMBEDDED # Opus playback for age-restricted / embed-only tracks
+            - TV # Opus + OAuth playback (refreshToken); metadata: none
         clientOptions:
             MUSIC:
+                playback: false # youtube-source lists no playback support for MUSIC
+                searching: true
+            # These three are the reliable non-web Opus players: they return the
+            # adaptive Opus stream (itag 251) instead of the SABR-gated web
+            # formats. With them disabled for playback the only players left
+            # were the SABR-gated web clients, whose muxed itag-18 fallback is
+            # AAC and has to be re-encoded - the exact quality loss this config
+            # exists to prevent. A client that gets flagged on a datacenter IP
+            # simply returns "requires login" and youtube-source tries the next
+            # one, so enabling them cannot make playback worse.
+            ANDROID_MUSIC:
                 playback: true
                 searching: true
-            # Playback disabled on the non-OAuth clients: YouTube flags their
-            # requests as bots on datacenter IPs ("This video requires login").
-            # OAuth (configured via YOUTUBE_REFRESH_TOKEN) only authenticates
-            # the TV client, which handles playback instead.
-            ANDROID_MUSIC:
-                playback: false
-                searching: true
             ANDROID_VR:
-                playback: false
+                playback: true
                 searching: true
             TVHTML5_SIMPLY:
-                playback: false
+                playback: true
                 searching: true
             # WEB is SABR-gated: when YouTube answers its /player request with only
             # SABR-gated adaptive formats, the plugin falls back to muxed itag 18,
@@ -130,10 +140,10 @@ plugins:
             WEB:
                 playback: false
                 searching: true
-            # MWEB and WEBEMBEDDED are also SABR-gated web clients; leaving them
-            # enabled for playback re-introduces the itag-18 fallback path that
-            # fails to decode ("Expected decoding to halt, got: 5"). Keep them
-            # for search/embed metadata only.
+            # MWEB is SABR-gated as well. WEBEMBEDDED stays enabled because it is
+            # the only client that can serve age-restricted / embed-only tracks.
+            # It sits after the Opus players above, so it is a last resort and
+            # the SABR itag-18 fallback is not the common path.
             MWEB:
                 playback: false
                 searching: true

@@ -38,7 +38,12 @@ const DEFAULT_METADATA_ONLY_SOURCES = [
 
 // Sources whose frames usually reach Lavalink already encoded as Opus. Bandcamp
 // is deliberately absent: it serves MP3, so it always has to be re-encoded.
-const OPUS_NATIVE_SOURCES = new Set(["youtube", "soundcloud", "http"]);
+// YouTube-plugin tracks report sourceName "youtube" (the source manager), and
+// YouTube Music resolutions go through that same manager, so both spellings are
+// accepted here. `http` is only a last-resort fallback for nodes that report no
+// codec at all - a direct URL may be an MP3/Icecast stream, which is why
+// isOpusNativeTrack() prefers the node-reported codec whenever one exists.
+const OPUS_NATIVE_SOURCES = new Set(["youtube", "youtubemusic", "soundcloud", "http"]);
 
 const METADATA_ONLY_SOURCES = new Set(
   (quality.metadataOnlySources || DEFAULT_METADATA_ONLY_SOURCES).map((s) => String(s).toLowerCase())

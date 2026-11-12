@@ -351,6 +351,37 @@ function stopRotation(voiceChannelId) {
 }
 
 /**
+ * Keep the player on the bit-exact Opus path by enforcing unity volume (100%).
+ *
+ * Every other value makes the node decode + re-encode the whole track, which is
+ * a second lossy generation and the CPU work that drops frames. The guard is
+ * deliberately conservative:
+ *   - it only writes when the volume is not already 100, so a track start does
+ *     not cost a needless player PATCH;
+ *   - it never fights an explicit `/volume` choice (volumeManager records
+ *     `requestedVolume`), because that is the user's decision to make;
+ *   - it does NOT touch filters. `player.set("filter", {})` (the old guard) set
+ *     custom player data and never reached the node, and resetting real filters
+ *     on every track would silently break `/filter` presets that are expected to
+ *     persist.
+ *
+ * @param {import("lavalink-client").Player} player
+ * @param {string} label log label
+ */
+async function ensureUnityVolume(player, label) {
+  if (!player || typeof player.setVolume !== "function") return;
+  if (Number(player.volume) === 100) return;
+  if (player.get?.("requestedVolume") !== undefined) return;
+
+  try {
+    await player.setVolume(100);
+    logger.debug(`[VC Status] ${label}: volume -> 100% (bit-exact Opus passthrough)`);
+  } catch (err) {
+    logger.debug(`[VC Status] ${label}: volume guard skipped: ${err?.message || err}`);
+  }
+}
+
+/**
  * Track Start Hook (Instant 0ms VC Status Update)
  * @param {import("discord.js").Client} client 
  * @param {import("lavalink-client").Player} player 
@@ -360,20 +391,7 @@ async function onTrackStart(client, player, track) {
   if (config.voiceStatus?.enabled === false) return;
   if (!player?.voiceChannelId || !track) return;
 
-  // --- Audio Quality Guard: Ensure unity volume and no filters for bit-exact Opus passthrough ---
-  if (player.setVolume) {
-    player.setVolume(100);
-    logger.debug(`[VC Status] Auto-set volume to 100% for bit-exact Opus passthrough`);
-  }
-  if (player?.set?.("filter")) {
-    try {
-      await player.set?.("filter", {});
-      logger.debug(`[VC Status] Auto-reset filters for bit-exact Opus passthrough`);
-    } catch (_) {
-      // Filter reset may fail if no filter manager is attached; not critical.
-    }
-  }
-  // ----------------------------------------------------
+  await ensureUnityVolume(player, "Track start");
 
   const voiceChannelId = player.voiceChannelId;
   const trackId = track.info?.identifier || track.info?.uri || track.info?.title;
@@ -404,20 +422,7 @@ async function onPause(client, player) {
   const track = player.queue?.current;
   if (!track) return;
 
-  // --- Audio Quality Guard: Reset volume and filters when pausing ---
-  if (player.setVolume) {
-    player.setVolume(100);
-    logger.debug(`[VC Status] Paused: auto-reset volume to 100%`);
-  }
-  if (player?.set?.("filter")) {
-    try {
-      await player.set?.("filter", {});
-      logger.debug(`[VC Status] Paused: auto-reset filters`);
-    } catch (_) {
-      // Filter reset may fail if no filter manager is attached; not critical.
-    }
-  }
-  // -----------------------------------------------------
+  await ensureUnityVolume(player, "Pause");
 
   stopRotation(voiceChannelId);
 
@@ -436,20 +441,7 @@ async function onResume(client, player) {
   const track = player.queue?.current;
   if (!track) return;
 
-  // --- Audio Quality Guard: Ensure unity volume and no filters on resume ---
-  if (player.setVolume) {
-    player.setVolume(100);
-    logger.debug(`[VC Status] Resumed: auto-set volume to 100%`);
-  }
-  if (player?.set?.("filter")) {
-    try {
-      await player.set?.("filter", {});
-      logger.debug(`[VC Status] Resumed: auto-reset filters`);
-    } catch (_) {
-      // Filter reset may fail if no filter manager is attached; not critical.
-    }
-  }
-  // -------------------------------------------------------
+  await ensureUnityVolume(player, "Resume");
 
   currentTrackIdentifiers.delete(player.voiceChannelId);
   await onTrackStart(client, player, track);

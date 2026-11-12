@@ -182,10 +182,13 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    # Opus-capable clients only. IOS / ANDROID / TV return no Opus music format,
-    # so a track loaded through them is decoded and re-encoded - the second
-    # lossy generation this config exists to avoid.
-    # MUSIC first: it is the only client that understands `ytmsearch:`.
+    # Order follows the official youtube-source capability table
+    # (github.com/lavalink-devs/youtube-source -> "Available Clients").
+    # MUSIC is SEARCH ONLY (no Opus formats, no playback support): it resolves
+    # `ytmsearch:` metadata and the audio comes from the clients below.
+    # ANDROID_MUSIC / ANDROID_VR / TVHTML5_SIMPLY / WEBEMBEDDED / TV return
+    # adaptive Opus (itag 251), which is what keeps playback on bit-exact Opus
+    # passthrough instead of transcoding a muxed AAC fallback.
     clients:
       - MUSIC
       - ANDROID_MUSIC
@@ -197,16 +200,17 @@ plugins:
       - TV
     clientOptions:
       MUSIC:
+        playback: false # youtube-source lists no playback support for MUSIC
+        searching: true
+      # Reliable non-web Opus players (adaptive itag 251, not SABR-gated).
+      ANDROID_MUSIC:
         playback: true
         searching: true
-      ANDROID_MUSIC:
-        playback: false
-        searching: true
       ANDROID_VR:
-        playback: false
+        playback: true
         searching: true
       TVHTML5_SIMPLY:
-        playback: false
+        playback: true
         searching: true
       # WEB is SABR-gated; see the deployed application.yml for the rationale.
       WEB:
