@@ -72,6 +72,9 @@ function readFrameStats(source) {
  */
 function diffFrames(previous, next) {
   if (!previous || !next) return null;
+  // Guard: reject non-finite values to avoid NaN propagation
+  if (!Number.isFinite(previous.sent) || !Number.isFinite(previous.deficit)) return null;
+  if (!Number.isFinite(next.sent) || !Number.isFinite(next.deficit)) return null;
   if (next.sent < previous.sent || next.deficit < previous.deficit) return null;
 
   return {
@@ -92,12 +95,16 @@ function classifyFrameDelta(previous, next, options = {}) {
   const delta = diffFrames(previous, next);
   if (!delta) return null;
 
+  // Guard: ensure delta values are finite before calculations
+  if (!Number.isFinite(delta.sent) || !Number.isFinite(delta.deficit) || !Number.isFinite(delta.nulled)) return null;
+
   // `deficit` is frames the node never sent; `nulled` is frames it sent as
   // silence because no audio was ready. Both are silence reaching the listener,
   // and under DAVE the nulled counter is the one that actually moves.
   const silentFrames = delta.deficit + delta.nulled;
   const total = delta.sent + delta.deficit;
-  const ratePercent = total > 0 ? (silentFrames / total) * 100 : 0;
+  // Guard: avoid division by zero or NaN
+  const ratePercent = total > 0 && Number.isFinite(silentFrames) ? (silentFrames / total) * 100 : 0;
   const warnFrames = Number.isFinite(options.warnFrames)
     ? options.warnFrames
     : config.audio.frameWarnDeficitFrames;
@@ -107,12 +114,12 @@ function classifyFrameDelta(previous, next, options = {}) {
 
   return {
     ...delta,
-    silentFrames,
-    ratePercent,
+    silentFrames: Number.isFinite(silentFrames) ? silentFrames : 0,
+    ratePercent: Number.isFinite(ratePercent) ? ratePercent : 0,
     silenceMs: silentFrames * FRAME_MS,
     // Two independent signals: enough absolute frames of silence, or a high
     // silence rate in a low-traffic window. Either one is audible.
-    healthy: silentFrames < warnFrames && ratePercent < warnRatePercent,
+    healthy: Number.isFinite(silentFrames) && silentFrames < warnFrames && Number.isFinite(ratePercent) && ratePercent < warnRatePercent,
   };
 }
 

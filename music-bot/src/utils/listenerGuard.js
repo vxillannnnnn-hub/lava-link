@@ -40,11 +40,12 @@ function countHumanListeners(client, guild, channelId) {
   if (!guild || !channelId || !guild.voiceStates?.cache) return 0;
 
   const multiBotCoordinator = require("./multiBotCoordinator");
+  const botIds = multiBotCoordinator.allBotIds || [];
   let humans = 0;
 
   for (const vs of guild.voiceStates.cache.values()) {
-    if (vs.channelId !== channelId || vs.id === client?.user?.id) continue;
-    if (multiBotCoordinator.allBotIds?.includes(vs.id)) continue;
+    if (vs.channelId !== channelId || vs.id == null) continue;
+    if (botIds.includes(vs.id)) continue;
     const isBot =
       vs.member?.user?.bot ||
       guild.members?.cache?.get(vs.id)?.user?.bot ||
@@ -54,7 +55,6 @@ function countHumanListeners(client, guild, channelId) {
 
   return humans;
 }
-
 /**
  * Resolve the discord.js client for a player.
  *
@@ -187,12 +187,12 @@ async function resumeStreaming(player) {
   return true;
 }
 
-function watchKey(client, guildId) {
-  return `${guildId}_${client?.user?.id}`;
+function watchKey(client, guildId, channelId) {
+  return `${guildId}_${channelId}_${client?.user?.id}`;
 }
 
-function clearWatch(client, guildId) {
-  const key = watchKey(client, guildId);
+function clearWatch(client, guildId, channelId) {
+  const key = watchKey(client, guildId, channelId);
   const existing = watches.get(key);
   if (!existing) return false;
   clearTimeout(existing.timer);
@@ -233,10 +233,10 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
 
   const channelId = player.voiceChannelId;
   const humans = countHumanListeners(resolvedClient, guild, channelId);
-  const key = watchKey(resolvedClient, player.guildId);
+  const key = watchKey(resolvedClient, player.guildId, channelId);
 
   if (humans > 0) {
-    const cancelled = clearWatch(resolvedClient, player.guildId);
+    const cancelled = clearWatch(resolvedClient, player.guildId, channelId);
     if (cancelled) {
       logger.info(
         `[ListenerGuard] Human listener(s) present (${humans}) in guild ${player.guildId}. Auto-leave cancelled.`
@@ -255,7 +255,7 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
 
   // Alone. 24/7 keeps the seat but must not broadcast to an empty room.
   if (player.get?.("247")) {
-    clearWatch(resolvedClient, player.guildId);
+    clearWatch(resolvedClient, player.guildId, channelId);
     if (config.player.stopStreamingAloneIn247 !== false) {
       const suspended = await suspendStreaming(player);
       if (suspended) {

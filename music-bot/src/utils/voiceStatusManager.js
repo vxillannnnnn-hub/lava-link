@@ -302,7 +302,9 @@ function startRotation(client, player, track) {
   let currentIndex = templateIndices.get(voiceChannelId) || 0;
 
   // Immediately render and apply the active template with priority = true
-  const initialText = formatStatusString(templates[currentIndex % templates.length], track);
+  // Guard: templates.length is always >= 1 thanks to the guard above, but defend against edge cases.
+  const templateLen = templates.length || 1;
+  const initialText = formatStatusString(templates[currentIndex % templateLen], track);
   setChannelStatus(client, voiceChannelId, initialText, true);
 
   // Schedule template rotation while the song plays
@@ -321,7 +323,7 @@ function startRotation(client, player, track) {
       return;
     }
 
-    currentIndex = (currentIndex + 1) % templates.length;
+    currentIndex = (currentIndex + 1) % templateLen;
     templateIndices.set(voiceChannelId, currentIndex);
 
     const rotatedText = formatStatusString(templates[currentIndex], currentTrack);
@@ -354,9 +356,24 @@ function stopRotation(voiceChannelId) {
  * @param {import("lavalink-client").Player} player 
  * @param {object} track 
  */
-function onTrackStart(client, player, track) {
+async function onTrackStart(client, player, track) {
   if (config.voiceStatus?.enabled === false) return;
   if (!player?.voiceChannelId || !track) return;
+
+  // --- Audio Quality Guard: Ensure unity volume and no filters for bit-exact Opus passthrough ---
+  if (player.setVolume) {
+    player.setVolume(100);
+    logger.debug(`[VC Status] Auto-set volume to 100% for bit-exact Opus passthrough`);
+  }
+  if (player?.set?.("filter")) {
+    try {
+      await player.set?.("filter", {});
+      logger.debug(`[VC Status] Auto-reset filters for bit-exact Opus passthrough`);
+    } catch (_) {
+      // Filter reset may fail if no filter manager is attached; not critical.
+    }
+  }
+  // ----------------------------------------------------
 
   const voiceChannelId = player.voiceChannelId;
   const trackId = track.info?.identifier || track.info?.uri || track.info?.title;
@@ -379,13 +396,28 @@ function onTrackStart(client, player, track) {
  * @param {import("discord.js").Client} client 
  * @param {import("lavalink-client").Player} player 
  */
-function onPause(client, player) {
+async function onPause(client, player) {
   if (config.voiceStatus?.enabled === false) return;
   const voiceChannelId = player.voiceChannelId;
   if (!voiceChannelId) return;
 
   const track = player.queue?.current;
   if (!track) return;
+
+  // --- Audio Quality Guard: Reset volume and filters when pausing ---
+  if (player.setVolume) {
+    player.setVolume(100);
+    logger.debug(`[VC Status] Paused: auto-reset volume to 100%`);
+  }
+  if (player?.set?.("filter")) {
+    try {
+      await player.set?.("filter", {});
+      logger.debug(`[VC Status] Paused: auto-reset filters`);
+    } catch (_) {
+      // Filter reset may fail if no filter manager is attached; not critical.
+    }
+  }
+  // -----------------------------------------------------
 
   stopRotation(voiceChannelId);
 
@@ -399,13 +431,28 @@ function onPause(client, player) {
  * @param {import("discord.js").Client} client 
  * @param {import("lavalink-client").Player} player 
  */
-function onResume(client, player) {
+async function onResume(client, player) {
   if (config.voiceStatus?.enabled === false) return;
   const track = player.queue?.current;
   if (!track) return;
 
+  // --- Audio Quality Guard: Ensure unity volume and no filters on resume ---
+  if (player.setVolume) {
+    player.setVolume(100);
+    logger.debug(`[VC Status] Resumed: auto-set volume to 100%`);
+  }
+  if (player?.set?.("filter")) {
+    try {
+      await player.set?.("filter", {});
+      logger.debug(`[VC Status] Resumed: auto-reset filters`);
+    } catch (_) {
+      // Filter reset may fail if no filter manager is attached; not critical.
+    }
+  }
+  // -------------------------------------------------------
+
   currentTrackIdentifiers.delete(player.voiceChannelId);
-  onTrackStart(client, player, track);
+  await onTrackStart(client, player, track);
 }
 
 /**
@@ -440,10 +487,11 @@ function setIdleVoiceStatus(client, voiceChannelId, guildId) {
     Array.isArray(configuredIdleTemplates) && configuredIdleTemplates.length > 0
       ? configuredIdleTemplates
       : DEFAULT_IDLE_TEMPLATES;
-  let currentIndex = idleTemplateIndices.get(voiceChannelId) ?? Math.floor(Math.random() * idleTemplates.length);
+  const idleTemplateLen = idleTemplates.length || 1;
+  let currentIndex = idleTemplateIndices.get(voiceChannelId) ?? Math.floor(Math.random() * idleTemplateLen);
   idleTemplateIndices.set(voiceChannelId, currentIndex);
 
-  const initialStatus = formatIdleStatus(idleTemplates[currentIndex % idleTemplates.length], guildId);
+  const initialStatus = formatIdleStatus(idleTemplates[currentIndex % idleTemplateLen], guildId);
   setChannelStatus(client, voiceChannelId, initialStatus, false);
 
   // Continuous rotation for idle status
@@ -464,7 +512,7 @@ function setIdleVoiceStatus(client, voiceChannelId, guildId) {
       return;
     }
 
-    currentIndex = (currentIndex + 1) % idleTemplates.length;
+    currentIndex = (currentIndex + 1) % idleTemplateLen;
     idleTemplateIndices.set(voiceChannelId, currentIndex);
 
     const rotatedStatus = formatIdleStatus(idleTemplates[currentIndex], guildId);

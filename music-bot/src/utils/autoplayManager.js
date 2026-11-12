@@ -402,8 +402,12 @@ class AutoplayManager {
   extractYouTubeId(track) {
     const info = track?.info;
     if (!info?.identifier) return null;
-    const source = String(info.sourceName || "").toLowerCase();
-    if (source !== "youtube" && source !== "youtubemusic" && source !== "youtube-music") return null;
+    const source = String(info.sourceName || "").toLowerCase().trim();
+    // Accept the known YouTube source names plus common variants
+    const knownYouTubeSources = ["youtube", "youtubemusic", "youtube-music", "ytsearch", "ytmsearch"];
+    const isYouTubeSource = knownYouTubeSources.includes(source) || source.startsWith("youtube");
+    if (!isYouTubeSource) return null;
+    // YouTube video IDs are always exactly 11 characters of [A-Za-z0-9_-]
     return /^[A-Za-z0-9_-]{11}$/.test(info.identifier) ? info.identifier : null;
   }
 
