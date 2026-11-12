@@ -16,7 +16,9 @@ module.exports = {
     const info = node?.info;
 
     // Discord Bot metrics & Cross-Shard Aggregation
-    const botUptime = formatDuration(client.uptime);
+    // `client.uptime` is null before the client is ready, and formatDuration(null)
+    // renders "LIVE" - which made the uptime field read LIVE on a cold boot.
+    const botUptime = formatDuration(client.uptime || 0);
     let totalGuilds = client.guilds.cache.size;
     let totalUsers = client.users.cache.size;
     let totalRamBytes = process.memoryUsage().heapUsed;
@@ -51,7 +53,7 @@ module.exports = {
     const nodeUptime = stats?.uptime ? formatDuration(stats.uptime) : "N/A";
 
     const lavalinkCpu = stats?.cpu
-      ? `${(stats.cpu.lavalinkLoad * 100).toFixed(1)}% (Lavalink) / ${(stats.cpu.systemLoad * 100).toFixed(1)}% (System)`
+      ? `${((Number(stats.cpu.lavalinkLoad) || 0) * 100).toFixed(1)}% (Lavalink) / ${((Number(stats.cpu.systemLoad) || 0) * 100).toFixed(1)}% (System)`
       : "N/A";
 
     const lavalinkRam = stats?.memory

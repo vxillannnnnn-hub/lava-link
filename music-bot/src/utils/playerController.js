@@ -26,6 +26,7 @@ const voiceStatusManager = require("./voiceStatusManager");
 const logger = require("./logger");
 const volumeManager = require("./volumeManager");
 const playerActions = require("./playerActions");
+const audioQuality = require("./audioQuality");
 
 /**
  * Only http(s) URLs are valid for Discord buttons / embed links. Lavalink track
@@ -553,23 +554,51 @@ async function handlePlayerButton(interaction, client) {
       await activePlayer.connect();
     }
 
-    let loaded = 0;
-    for (const item of targetTracks) {
-      try {
-        const res = await activePlayer.search({ query: item.uri || item.title }, interaction.user);
-        if (res?.tracks?.length > 0) {
-          activePlayer.queue.add(res.tracks[0]);
-          loaded++;
-        }
-      } catch {}
-    }
+    // Bounded concurrency + queue cap. The old loop searched every saved track
+    // one after another without checking the cap, so a 200-track playlist ran
+    // for minutes (long past the interaction window) and could overflow the
+    // queue on top of that.
+    const capacity = playerActions.queueCapacity(activePlayer);
+    const targets = capacity > 0 ? targetTracks.slice(0, capacity) : [];
+    const resolved = new Array(targets.length);
+    let cursor = 0;
 
-    if (!activePlayer.playing && !activePlayer.paused) {
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const index = cursor++;
+        const item = targets[index];
+        try {
+          const res = await activePlayer.search({ query: item.uri || item.title }, interaction.user);
+          if (res?.tracks?.length > 0) resolved[index] = res.tracks[0];
+        } catch (_) {
+          // One dead link must not abort the whole playlist.
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(4, targets.length) }, () => worker()));
+
+    const playable = await audioQuality.ensureFullQualityTracks(
+      activePlayer,
+      resolved.filter(Boolean),
+      interaction.user
+    );
+    if (playable.length) activePlayer.queue.add(playable);
+    const loaded = playable.length;
+
+    if (!activePlayer.playing && !activePlayer.paused && activePlayer.queue.tracks.length > 0) {
       await activePlayer.play();
     }
 
+    const capNote =
+      capacity <= 0
+        ? ` The queue is already full (${config.player.maxQueueSize} tracks).`
+        : targetTracks.length > targets.length
+          ? ` Queue capped at ${config.player.maxQueueSize} tracks.`
+          : "";
+
     return interaction.editReply({
-      content: `${emojis.music} Loaded and queued **${loaded} track(s)** from **${playlistName}**!`,
+      content: `${emojis.music} Loaded and queued **${loaded} track(s)** from **${playlistName}**!${capNote}`,
     });
   }
 

@@ -39,7 +39,10 @@ module.exports = {
         // In 24/7 mode the queue is the whole point. Keep the player (and its
         // queue) alive and let the reconnect engine re-attach it; destroying it
         // here wiped the queue on every kick or manual move.
-        listenerGuard.clearWatch(client, guildId);
+        // clearWatch() is keyed by guild + channel; omitting the channel built a
+        // key that never matched, so the armed leave timer survived the
+        // disconnect and could later destroy a reconnected (24/7) player.
+        listenerGuard.clearWatch(client, guildId, oldState.channelId);
         if (player && !is247) {
           player.destroy("Bot disconnected from voice channel").catch(() => {});
         }

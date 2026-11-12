@@ -23,14 +23,12 @@ module.exports = {
     let newPrefix = interaction.options.getString("new");
 
     // Prefix form often arrives as `.prefix set m!` (the verb becomes the first
-    // argument). Drop it so the stored prefix is `m!`, not `set`.
-    if (
-      newPrefix &&
-      /^(set|change)$/i.test(newPrefix) &&
-      Array.isArray(interaction.args) &&
-      interaction.args.length > 1
-    ) {
-      newPrefix = interaction.args.slice(1).join(" ").trim();
+    // argument). Drop it so the stored prefix is `m!`, not `set`. The old check
+    // read `interaction.args`, which a CommandContext does not expose, so the
+    // verb was never stripped and `.prefix set m!` failed the 5-char limit.
+    if (newPrefix) {
+      const withoutVerb = String(newPrefix).replace(/^(?:set|change)\s+/i, "").trim();
+      if (withoutVerb) newPrefix = withoutVerb;
     }
 
     // If no argument provided, display the current prefix ephemerally

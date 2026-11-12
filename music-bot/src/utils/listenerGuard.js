@@ -286,6 +286,16 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
 
   watch.timer = setTimeout(async () => {
     watches.delete(key);
+
+    // The player may have been moved while this countdown ran (an admin drag, a
+    // `/join` into another channel, a 24/7 reconnect). Destroying it then killed
+    // a healthy session that had listeners in its NEW channel.
+    if (player.voiceChannelId && player.voiceChannelId !== channelId) return;
+    // A replacement player for the same guild must not be destroyed by the old
+    // one's timer either.
+    const registered = resolvedClient?.lavalink?.getPlayer?.(player.guildId);
+    if (registered && registered !== player) return;
+
     // Re-count against the channel this timer was armed for: the player may have
     // been moved since, and a stale count would disconnect an occupied channel.
     const stillAlone = countHumanListeners(resolvedClient, guild, channelId) === 0;

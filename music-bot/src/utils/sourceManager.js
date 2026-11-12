@@ -78,7 +78,14 @@ function detectSource(query) {
  */
 function getPlatformTheme(sourceName) {
   const key = (sourceName || "").toLowerCase();
-  return PLATFORM_THEMES[key] || PLATFORM_THEMES.stream;
+  // Playback defaults to `ytmsearch`, whose sourceName is "youtubemusic" (and
+  // older nodes report "ytsearch"). Without this mapping every YouTube Music
+  // track was labelled "Web Stream" in the dashboard, queue and embeds.
+  const normalized =
+    key === "youtubemusic" || key === "youtube-music" || key === "ytsearch" || key === "ytmsearch"
+      ? "youtube"
+      : key;
+  return PLATFORM_THEMES[normalized] || PLATFORM_THEMES.stream;
 }
 
 /**

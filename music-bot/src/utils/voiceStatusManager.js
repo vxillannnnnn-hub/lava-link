@@ -127,15 +127,17 @@ function cleanArtistAndTitle(rawTitle, rawAuthor) {
  * @returns {string}
  */
 function formatIdleStatus(template, guildId = null) {
-  let prefix = ".";
+  // `config.discord.prefix` does not exist (the default lives in
+  // `config.prefix.default`), so this always fell back to "." even when the
+  // operator configured DEFAULT_PREFIX.
+  const fallbackPrefix = config.prefix?.default || ".";
+  let prefix = fallbackPrefix;
   if (guildId && db?.getGuildPrefix) {
     try {
-      prefix = db.getGuildPrefix(guildId) || config.discord?.prefix || ".";
+      prefix = db.getGuildPrefix(guildId) || fallbackPrefix;
     } catch {
-      prefix = config.discord?.prefix || ".";
+      prefix = fallbackPrefix;
     }
-  } else {
-    prefix = config.discord?.prefix || ".";
   }
 
   let status = template.replace(/\{prefix\}/gi, prefix);

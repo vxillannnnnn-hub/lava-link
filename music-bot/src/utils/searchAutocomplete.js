@@ -21,14 +21,15 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
  * Fetch suggestions from Google / YouTube Suggest endpoint (< 400ms)
  */
 async function fetchGoogleSuggestions(query) {
+  let timeout = null;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1200);
+    timeout = setTimeout(() => controller.abort(), 1200);
+    if (timeout.unref) timeout.unref();
     const url = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`;
-    
+
     const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    
+
     if (!res.ok) return [];
     const data = await res.json();
     const suggestions = data[1] || [];
@@ -42,6 +43,10 @@ async function fetchGoogleSuggestions(query) {
     });
   } catch {
     return [];
+  } finally {
+    // The abort timer used to survive an exception (and a failed fetch), leaking
+    // one timer per keystroke that threw.
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -115,16 +120,21 @@ async function handleSearchAutocomplete(interaction, client) {
   // Clamp strictly to Discord's maximum allowed 25 choices (we use top 10 for clean UX)
   const finalChoices = choices.slice(0, 10);
 
-  // Store in cache with LRU eviction (cap at 500 entries to prevent memory leaks)
-  if (autocompleteCache.size >= 500) {
-    const oldestKey = autocompleteCache.keys().next().value;
-    if (oldestKey) autocompleteCache.delete(oldestKey);
-  }
+  // Cache only real results: an empty list usually means the node hiccupped, and
+  // caching it made that query return NOTHING for the next five minutes even
+  // after the node recovered.
+  if (finalChoices.length > 0) {
+    // Store in cache with LRU eviction (cap at 500 entries to prevent memory leaks)
+    if (autocompleteCache.size >= 500) {
+      const oldestKey = autocompleteCache.keys().next().value;
+      if (oldestKey) autocompleteCache.delete(oldestKey);
+    }
 
-  autocompleteCache.set(trimmedQuery, {
-    choices: finalChoices,
-    timestamp: Date.now(),
-  });
+    autocompleteCache.set(trimmedQuery, {
+      choices: finalChoices,
+      timestamp: Date.now(),
+    });
+  }
 
   return interaction.respond(finalChoices).catch(() => {});
 }

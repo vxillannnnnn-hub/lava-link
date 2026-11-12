@@ -55,7 +55,10 @@ class BotClient extends Client {
         },
         users: {
           interval: 3600,
-          filter: () => (user) => !user.bot,
+          // discord.js calls filter(user) and checks the RESULT, so returning a
+          // function (as `() => (user) => !user.bot` did) is always truthy and
+          // swept every user including bots, ignoring the intent.
+          filter: (user) => !user.bot,
         },
       },
     });

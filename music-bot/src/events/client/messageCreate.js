@@ -31,11 +31,12 @@ module.exports = {
     const parsed = parseMessage(message, guildPrefix, client.user);
     if (!parsed) return;
 
-    // 4. Ensure guild member is cached or resolved for permission & voice checks
+    // 4. Ensure guild member is cached for permission & voice checks.
+    // `Message#member` is a getter with no setter (it reads the member cache), so
+    // assigning the fetch result to it was a no-op in sloppy mode and a latent
+    // TypeError under strict/ESM. Fetching is what actually populates the cache.
     if (!message.member && message.guild) {
-      try {
-        message.member = await message.guild.members.fetch(message.author.id);
-      } catch (_) {}
+      await message.guild.members.fetch(message.author.id).catch(() => null);
     }
 
     // 5. Look up matching application command (resolves command name or alias)

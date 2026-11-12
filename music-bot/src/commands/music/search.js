@@ -183,7 +183,7 @@ module.exports = {
       );
 
       descriptionLines.push(
-        `\`${index + 1}.\` ${cleanTitle} - \`${cleanAuthor}\` (\`${duration}\`)`
+        `\`${index + 1}.\` ${cleanTitle} - \`${cleanAuthor}\` (\`${durationDisplay}\`)`
       );
     });
 

@@ -126,6 +126,13 @@ module.exports = {
 
       if (player) {
         player.set("247", false);
+
+        // The reply promises a disconnect. queueEnd already fired while 24/7 was
+        // on, so no timer exists and the bot would have stayed connected to an
+        // empty channel indefinitely.
+        if (!player.queue?.current && (player.queue?.tracks?.length || 0) === 0) {
+          require("../../utils/idleLeave").schedule(player, client);
+        }
       }
 
       const botTag = client.user.username || "Bot";

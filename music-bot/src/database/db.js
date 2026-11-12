@@ -40,7 +40,12 @@ try {
 try {
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
-  logger.info("[Database] WAL mode enabled, synchronous mode set to NORMAL");
+  // SQLite defaults to NO foreign keys, so `ON DELETE CASCADE` on
+  // playlist_tracks never fired and every deleted playlist left its tracks
+  // behind forever (invisible to the export, but they bloat bot.db and the
+  // upload/download of the database on every runner restart).
+  db.pragma("foreign_keys = ON");
+  logger.info("[Database] WAL mode enabled, synchronous mode set to NORMAL, foreign keys enforced");
 } catch (err) {
   logger.error("[Database] Failed to set pragmas:", err?.message);
   throw err;
@@ -723,16 +728,31 @@ module.exports = {
 
   getAll247Guilds() {
     try {
-      const bots = stmts.getAll247Bots.all();
-      if (bots && bots.length > 0) {
-        return bots.map((b) => ({
-          guild_id: b.guild_id,
-          voice_247_channel_id: b.voice_channel_id,
-          text_247_channel_id: b.text_channel_id,
-          bot_247_user_id: b.bot_user_id,
-        }));
+      const bots = stmts.getAll247Bots.all() || [];
+      const legacy = stmts.getAll247Guilds.all() || [];
+
+      // Both sources can be populated: the fleet table wins for a guild that has
+      // rows, and guilds that only ever used the single-bot (legacy) columns must
+      // still be reconnected. Returning `bots` alone silently dropped every
+      // legacy 24/7 guild as soon as ONE bot used the fleet table.
+      const byGuild = new Map();
+      for (const row of legacy) {
+        byGuild.set(`${row.guild_id}::${row.bot_247_user_id || "default"}`, {
+          guild_id: row.guild_id,
+          voice_247_channel_id: row.voice_247_channel_id,
+          text_247_channel_id: row.text_247_channel_id,
+          bot_247_user_id: row.bot_247_user_id,
+        });
       }
-      return stmts.getAll247Guilds.all();
+      for (const row of bots) {
+        byGuild.set(`${row.guild_id}::${row.bot_user_id || "default"}`, {
+          guild_id: row.guild_id,
+          voice_247_channel_id: row.voice_channel_id,
+          text_247_channel_id: row.text_channel_id,
+          bot_247_user_id: row.bot_user_id,
+        });
+      }
+      return [...byGuild.values()];
     } catch (err) {
       logger.error("[Database] Failed to fetch 24/7 guilds:", err.message);
       return [];

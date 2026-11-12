@@ -7,6 +7,12 @@ const config = require("../../config");
 const audioQuality = require("../../utils/audioQuality");
 const { queueCapacity } = require("../../utils/playerActions");
 
+// The playlist name is embedded in a button custom_id (`cmd_pl_play_<name>`),
+// and Discord rejects custom_ids longer than 100 characters - which failed the
+// whole reply with "Invalid Form Body" for a long name. 60 leaves room for the
+// prefix and keeps names readable in menus.
+const MAX_PLAYLIST_NAME = 60;
+
 /**
  * Resolve and enqueue saved tracks with bounded concurrency.
  *
@@ -107,6 +113,11 @@ module.exports = {
     if (subcommand === "create") {
       const name = (interaction.options.getString("name") || "").trim();
       if (!name) return interaction.reply(errorText("Provide a playlist name."));
+      if (name.length > MAX_PLAYLIST_NAME) {
+        return interaction.reply(
+          errorText(`Playlist names are limited to ${MAX_PLAYLIST_NAME} characters.`)
+        );
+      }
       const created = db.createPlaylist(userId, name);
 
       if (!created) {
@@ -137,6 +148,11 @@ module.exports = {
     if (subcommand === "save-queue") {
       const name = (interaction.options.getString("name") || "").trim();
       if (!name) return interaction.reply(errorText("Provide a playlist name."));
+      if (name.length > MAX_PLAYLIST_NAME) {
+        return interaction.reply(
+          errorText(`Playlist names are limited to ${MAX_PLAYLIST_NAME} characters.`)
+        );
+      }
       const player = client.lavalink.getPlayer(interaction.guildId);
 
       if (!player || (!player.queue.current && player.queue.tracks.length === 0)) {
@@ -159,16 +175,31 @@ module.exports = {
       if (player.queue.current) allTracks.push(player.queue.current);
       allTracks.push(...player.queue.tracks);
 
+      // Saving the same queue twice used to duplicate every track in the
+      // playlist, because the table has no unique constraint on (playlist, uri).
+      const existingUris = new Set(
+        db.getPlaylistTracks(pl.id).map((row) => row.uri).filter(Boolean)
+      );
+
       let savedCount = 0;
+      let skipped = 0;
       for (const track of allTracks) {
+        const uri = track?.info?.uri || track?.info?.identifier;
+        if (uri && existingUris.has(uri)) {
+          skipped++;
+          continue;
+        }
         db.addTrackToPlaylist(pl.id, track);
+        if (uri) existingUris.add(uri);
         savedCount++;
       }
+
+      const skippedNote = skipped ? ` (${skipped} already saved)` : "";
 
       return interaction.reply(
         actionWithButton(
           emojis.playlist,
-          `Saved **${savedCount} track(s)** into personal playlist **${pl.name}**`,
+          `Saved **${savedCount} track(s)** into personal playlist **${pl.name}**${skippedNote}`,
           `Use \`/playlist play ${pl.name}\` to stream it anywhere anytime.`,
           {
             customId: `cmd_pl_play_${pl.name}`,

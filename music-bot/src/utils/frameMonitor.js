@@ -131,9 +131,15 @@ function describeFrameDelta(delta, windowSeconds) {
   if (!delta) return "no frame data";
   if (delta.deficit === 0 && delta.nulled === 0) return `${window} clean (${delta.sent} frames sent)`;
 
+  // Report BOTH counters: a nulled-only window (the DAVE stall) used to print
+  // "0 frame(s) of silence", which read like a false alarm on a real outage.
+  const causes = [];
+  if (delta.deficit) causes.push(`${delta.deficit} dropped`);
+  if (delta.nulled) causes.push(`${delta.nulled} padded`);
+
   return (
-    `${delta.deficit} frame(s) (~${delta.silenceMs}ms of silence) in the ${window} • ` +
-    `${delta.sent} sent • ${delta.ratePercent.toFixed(1)}% drop rate`
+    `${causes.join(" + ")} frame(s) (~${delta.silenceMs}ms of silence) in the ${window} • ` +
+    `${delta.sent} sent • ${delta.ratePercent.toFixed(1)}% silence rate`
   );
 }
 
@@ -683,7 +689,11 @@ class FrameMonitor {
     const windowSeconds = Math.max(1, Math.round((num(config.audio.frameLogIntervalMs) || 15000) / 1000));
     const players = activePlayerSummaries(state.client);
 
-    if (delta.deficit === 0) {
+    // `nulled` frames are silence the node padded in because no audio was ready,
+    // and under DAVE that is the counter that actually moves. Returning early on
+    // `deficit === 0` alone therefore hid the exact failure this monitor exists
+    // to catch.
+    if (delta.deficit === 0 && delta.nulled === 0) {
       if (config.audio.frameLogCleanSamples) {
         logger.debug(
           `[FrameMonitor] Node "${state.node.id}" ${describeFrameDelta(delta, windowSeconds)} • ${players.length} playing`
@@ -774,9 +784,10 @@ class FrameMonitor {
       ? "passthrough"
       : "transcoded";
 
-    if (delta.deficit === 0) {
+    const silentFrames = delta.deficit + delta.nulled;
+    if (silentFrames === 0) {
       logger.debug(
-        `[FrameMonitor] Guild ${player.guildId} "${title}" ran ${seconds}s with 0 dropped frames (${transcoding})`
+        `[FrameMonitor] Guild ${player.guildId} "${title}" ran ${seconds}s with 0 dropped/padded frames (${transcoding})`
       );
       return delta;
     }
@@ -784,7 +795,7 @@ class FrameMonitor {
     const others = activePlayerSummaries(client).filter((p) => String(p.guildId) !== String(player.guildId));
     logger.warn(
       `[FrameMonitor] Guild ${player.guildId} "${title}" ran ${seconds}s (${transcoding}) while the node dropped ` +
-        `${delta.deficit} frame(s) (~${delta.deficit * FRAME_MS}ms of silence). Node-wide counter shared with ` +
+        `${delta.deficit} and padded ${delta.nulled} frame(s) (~${silentFrames * FRAME_MS}ms of silence). Node-wide counter shared with ` +
         `${others.length ? describePlayers(others) : "no other players"}. ${describeCpu(player?.node?.stats)}`
     );
     return delta;

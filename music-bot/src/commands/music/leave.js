@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { actionText, errorText } = require("../../utils/responses");
 const emojis = require("../../utils/emojis");
+const djManager = require("../../utils/djManager");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,6 +12,14 @@ module.exports = {
     const player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) {
       return interaction.reply(errorText("I am not currently connected to any voice channel in this server."));
+    }
+
+    // /leave used to be ungated: any member could disconnect a session that
+    // everyone else in the channel was listening to. Every other playback
+    // control already goes through the DJ check.
+    const djCheck = djManager.canManagePlayer(interaction.member, player, false);
+    if (!djCheck.allowed) {
+      return interaction.reply(errorText(djCheck.reason));
     }
 
     const vcId = player.voiceChannelId;

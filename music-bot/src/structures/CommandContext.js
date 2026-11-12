@@ -58,7 +58,12 @@ class CommandContext {
     } else {
       // Determine if the command uses subcommands (e.g. .playlist create or .dj set)
       const subcommands = SUBCOMMANDS[commandName?.toLowerCase()];
-      const hasSubcommand = Boolean(subcommands);
+      const firstArg = this.args[0] ? String(this.args[0]).toLowerCase() : null;
+      // Only consume the first token when it really IS one of this command's
+      // subcommands. Slicing unconditionally discarded the value in the bare
+      // form, so `.autoplay off` toggled instead of disabling ("off" is not a
+      // subcommand, and getBoolean then saw an empty argument list).
+      const hasSubcommand = Boolean(subcommands) && firstArg !== null && subcommands.includes(firstArg);
       const effectiveArgs = hasSubcommand ? this.args.slice(1) : this.args;
 
       this.options = {
