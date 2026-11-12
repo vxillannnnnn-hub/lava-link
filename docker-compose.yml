@@ -1,20 +1,22 @@
 # NOTE: The live 24/7 node is deployed by .github/workflows/main.yml on a
 # GitHub Actions runner (not by this file). This compose file is kept for a
-# Docker/VPS deployment and uses the same audio fix as the workflow:
-# Lavalink PR #1235 = koe 3.1.0, which removes the DAVE send-path stalls
-# (lavalink-devs/Lavalink#1222) heard as constant crackle/jitter.
+# Docker/VPS deployment.
+#
+# The DAVE send-path stall (lavalink-devs/Lavalink#1222, heard as constant
+# crackle) is fixed by koe 3.1.0, which NO published Lavalink image ships yet:
+# `dev` still pins koe 3.0.0 and PR #1235 is unmerged. The workflow builds that
+# PR head itself; an image pulled here will still crackle until upstream
+# releases it. Set LAVALINK_IMAGE to a tag that contains koe 3.1.0 once one
+# exists.
 version: "3.8"
 
 services:
   lavalink:
-    # Upstream Lavalink `dev`: koe/libdave updated past the 4.2.2 release
-    # (PR #1234 and later), which is where the DAVE send-path stall
-    # (lavalink-devs/Lavalink#1222, heard as constant crackle) is fixed. The
-    # 4.2.2 release itself ships koe 3.0.0-pre6 and still has it.
-    # Tracking `dev` keeps the fix; pin by digest
-    # (ghcr.io/lavalink-devs/lavalink@sha256:...) for a frozen deployment,
-    # exactly as the workflow does via the LAVALINK_IMAGE variable.
-    image: ghcr.io/lavalink-devs/lavalink:dev
+    # Upstream Lavalink `dev`. It still ships koe 3.0.0, which has the DAVE
+    # send-path stall (lavalink-devs/Lavalink#1222 - constant crackle), so this
+    # image is only a placeholder for a VPS deployment until a tag with koe
+    # 3.1.0 is published; override with LAVALINK_IMAGE once it is.
+    image: ${LAVALINK_IMAGE:-ghcr.io/lavalink-devs/lavalink:dev}
     container_name: lavalink
     restart: unless-stopped
     environment:

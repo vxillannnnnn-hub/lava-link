@@ -68,8 +68,86 @@ jobs:
       # attributable to one immutable image. To pin instead of tracking, set the
       # LAVALINK_IMAGE repository variable to a digest ref
       # (ghcr.io/lavalink-devs/lavalink@sha256:...).
-      - name: Download Upstream Lavalink Node Build (koe/libdave dev)
+      # ------------------------------------------------------------------------
+      # koe 3.1.0 node build - the actual fix for the crackle
+      #
+      # The "flickering and crackling" every listener hears is the koe 3.0 send
+      # path, tracked as lavalink-devs/Lavalink#1222: with DAVE (Discord's
+      # mandatory E2EE voice) active, frames are encrypted on the JVM thread
+      # instead of being drained from the pre-filled native UDP queue, so any JVM
+      # hiccup lands on the wire as a gap. Measured on an idle host: 37-38
+      # packets/s instead of the expected 50, worst gaps 300-500ms, while the
+      # pacing between stalls is a perfect 20ms. bufferDurationMs does not mask
+      # it because the DAVE frames never enter that buffer.
+      #
+      # koe 3.1.0 is published and contains the fixes (KyokoBot/koe 3.0.0..3.1.0):
+      #   "fix a couple of reentrancy/race bugs"
+      #   "Fix audio cutoff during key ratchet negotiation"
+      #   "udpqueue: Fix packets being sent to the old IP address after a server
+      #    change"
+      # Lavalink `dev` still pins koe 3.0.0 and the bump (PR #1235, branch
+      # koe-perf) is unmerged - "This branch has not been deployed" - so every
+      # published image, including ghcr.io/lavalink-devs/lavalink:dev, still has
+      # the stall. Build the PR head here instead.
+      #
+      # Deliberately non-fatal: if the build fails for any reason the image step
+      # below runs exactly as before, so a broken upstream PR can never cost the
+      # 24/7 session its node.
+      # ------------------------------------------------------------------------
+      - name: Restore Gradle Cache (Lavalink koe build)
         if: matrix.component == 'lavalink'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: lavalink-koe-gradle-${{ runner.os }}-${{ vars.LAVALINK_KOE_REF || 'f7335760359f2386cab23eefe66284177f969ff5' }}
+
+      - name: Build Lavalink with koe 3.1.0 (DAVE send-path fix)
+        if: matrix.component == 'lavalink'
+        id: koe-build
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          KOE_REF: ${{ vars.LAVALINK_KOE_REF || 'f7335760359f2386cab23eefe66284177f969ff5' }}
+          GRADLE_OPTS: "-Xmx2g -Dorg.gradle.jvmargs=-Xmx2g"
+        run: |
+          set -uo pipefail
+          WORK="$RUNNER_TEMP/lavalink-koe"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+          git init -q "$WORK"
+          cd "$WORK"
+          git remote add origin https://github.com/alula/Lavalink.git
+          # Accept either a commit sha or a branch name; GitHub serves a reachable
+          # sha, but the branch is the fallback if that ever stops working.
+          if ! git fetch -q --depth 1 origin "$KOE_REF"; then
+            if ! git fetch -q --depth 1 origin koe-perf; then
+              echo "::warning::Could not fetch koe-perf ($KOE_REF); falling back to the upstream image."
+              exit 0
+            fi
+          fi
+          git checkout -q FETCH_HEAD
+          KOE_PIN=$(grep -oE 'version\("koe", "[^"]+"' settings.gradle.kts | head -1 || true)
+          echo "Building commit $(git rev-parse --short HEAD) - ${KOE_PIN:-koe version unknown}"
+          chmod +x ./gradlew
+          # Project path is :Lavalink-Server (hyphen), source dir LavalinkServer.
+          if ! ./gradlew --no-daemon --console=plain :Lavalink-Server:bootJar; then
+            echo "::warning::Gradle build of the koe 3.1.0 node failed; falling back to the upstream image."
+            exit 0
+          fi
+          JAR=$(ls -1 LavalinkServer/build/libs/*.jar 2>/dev/null | grep -v -- '-plain' | head -1 || true)
+          if [ -z "$JAR" ]; then
+            echo "::warning::Gradle produced no jar; falling back to the upstream image."
+            exit 0
+          fi
+          cp "$JAR" "$GITHUB_WORKSPACE/Lavalink.jar"
+          ls -lh "$GITHUB_WORKSPACE/Lavalink.jar"
+          echo "built=true" >> "$GITHUB_OUTPUT"
+          echo "KOE_LABEL=koe 3.1.0 (self-built, DAVE send-path fix)" >> "$GITHUB_ENV"
+
+      - name: Download Upstream Lavalink Node Build (fallback)
+        if: matrix.component == 'lavalink' && steps.koe-build.outputs.built != 'true'
         id: lavalink-image
         env:
           LAVALINK_IMAGE: ${{ vars.LAVALINK_IMAGE || 'ghcr.io/lavalink-devs/lavalink:dev' }}
@@ -82,6 +160,7 @@ jobs:
           echo "image=$LAVALINK_IMAGE" >> "$GITHUB_OUTPUT"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "Resolved image: $DIGEST"
+          echo "KOE_LABEL=koe 3.0.0 (upstream image fallback - DAVE send-path stall possible)" >> "$GITHUB_ENV"
 
           docker rm -f lavalink-extract >/dev/null 2>&1 || true
           docker create --name lavalink-extract "$LAVALINK_IMAGE" >/dev/null
@@ -124,16 +203,23 @@ jobs:
           JAR_ENTRIES=$( { unzip -l Lavalink.jar 2>/dev/null || jar tf Lavalink.jar 2>/dev/null; } \
             | grep -ci 'libdave' | tr -dc '0-9' || true )
           JAR_ENTRIES=${JAR_ENTRIES:-0}
-          FS_ENTRIES=$(docker run --rm --entrypoint sh "$IMAGE" -c \
-            'find /opt/Lavalink /app -iname "*libdave*" 2>/dev/null' 2>/dev/null \
-            | grep -c . | tr -dc '0-9' || true)
+          # Only the image fallback has an image to inspect; a self-built jar
+          # carries its libdave natives inside the boot jar.
+          if [ -n "${IMAGE:-}" ]; then
+            FS_ENTRIES=$(docker run --rm --entrypoint sh "$IMAGE" -c \
+              'find /opt/Lavalink /app -iname "*libdave*" 2>/dev/null' 2>/dev/null \
+              | grep -c . | tr -dc '0-9' || true)
+          else
+            FS_ENTRIES=0
+          fi
           FS_ENTRIES=${FS_ENTRIES:-0}
           DAVE_NATIVES=$((10#${JAR_ENTRIES} + 10#${FS_ENTRIES}))
           MANIFEST=$(unzip -p Lavalink.jar META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' \
             | grep -iE '^(Implementation-Version|Lavaplayer-Version):' | tr '\n' ' ' || true)
 
-          echo "image           : ${IMAGE}"
-          echo "image digest    : ${DIGEST}"
+          echo "koe source      : ${KOE_LABEL:-unknown}"
+          echo "image           : ${IMAGE:-self-built (koe-perf)}"
+          echo "image digest    : ${DIGEST:-n/a}"
           echo "jar sha256      : ${JAR_SHA}"
           echo "jar size        : ${JAR_BYTES} bytes"
           echo "koe version     : ${KOE_VERSION:-unavailable (no VERSION constant)}"
@@ -145,8 +231,8 @@ jobs:
             echo "## Lavalink node build"
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| Image | \`${IMAGE}\` |"
-            echo "| Digest | \`${DIGEST}\` |"
+            echo "| Image | \`${IMAGE:-self-built (koe-perf)}\` |"
+            echo "| Digest | \`${DIGEST:-n/a}\` |"
             echo "| Jar sha256 | \`${JAR_SHA}\` |"
             echo "| koe | \`${KOE_VERSION:-unknown}\` |"
             echo "| libdave | \`${DAVE_VERSION:-unknown}\` (${DAVE_NATIVES} entries: ${JAR_ENTRIES} jar, ${FS_ENTRIES} image) |"
@@ -434,7 +520,7 @@ jobs:
           | **REST Endpoint** | `${{ env.PUBLIC_URL }}` |
           | **WebSocket Endpoint** | `wss://${{ env.PUBLIC_HOST }}:443/v4/websocket` |
           | **GC Engine** | `Java 25 Generational ZGC (<1ms)` |
-          | **Voice Transport** | `Netty Native C-Epoll + koe 3.1.0 DAVE fix` |
+          | **Voice Transport** | `Netty Native C-Epoll + ${KOE_LABEL:-koe unknown}` |
           | **Session #** | `${{ github.run_number }}` |
           EOF
 
@@ -453,7 +539,7 @@ jobs:
           | **REST URI** | \`$PUBLIC_URL\` |
           | **WebSocket URI** | \`wss://$PUBLIC_HOST:443/v4/websocket\` |
           | **GC Engine** | \`Java 25 Generational ZGC (<1ms pauses)\` |
-          | **Transport** | \`Netty Native Linux Epoll + koe 3.1.0 (PR #1235)\` |
+          | **Transport** | \`Netty Native Linux Epoll + ${KOE_LABEL:-koe unknown}\` |
           EOF
           sed -i 's/^[ ]\{10\}//' NODE_STATUS.md
           git config user.name "github-actions[bot]"

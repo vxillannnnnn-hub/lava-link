@@ -21,12 +21,19 @@ const DAVE_MIN_VERSION = [4, 2, 0];
 const KNOWN_STALL_VERSION = "4.2.2";
 const STALL_ISSUE_URL = "https://github.com/lavalink-devs/Lavalink/issues/1222";
 // Builds whose koe/libdave carries the send-path fix keep the last release's
-// version string, so branch + commit is what identifies them: upstream `dev`
-// merged the koe/libdave update in PR #1234 and publishes that build to
-// ghcr.io/lavalink-devs/lavalink:dev. f733576 is the older third-party PR image,
-// kept so a deployment still running it is recognised as patched too.
+// version string, so branch + commit is what identifies them.
+//
+// f733576 is the koe-perf head (alula/Lavalink, PR #1235) that pins koe 3.1.0;
+// the deploy workflow now builds that commit itself. The branch name is checked
+// too because `/v4/info` reports the checked-out ref.
+//
+// `dev` used to be listed here on the assumption that upstream had merged the
+// bump. It has not: as of 2026-11 `dev` still pins koe 3.0.0 and PR #1235 is
+// open with changes requested, so treating a dev build as patched suppressed
+// the one warning that explains constant crackle. Measured behaviour (frame
+// rate ~37/s per player instead of 50) is the authority either way.
 const PATCHED_BUILD_COMMITS = ["f733576"];
-const PATCHED_BRANCHES = ["dev"];
+const PATCHED_BRANCHES = ["koe-perf"];
 
 function parseSemver(value) {
   const match = String(value || "").match(/(\d+)\.(\d+)\.(\d+)/);
@@ -86,8 +93,8 @@ async function runAudioSelfCheck(client, node) {
   // A dev build reports the last release's semver (4.2.2) while already having
   // the koe/libdave fix, so the semver alone must never be used to claim the
   // stall is present.
-  const isDevBranch = PATCHED_BRANCHES.includes(branch);
-  const isPatchedBuild = isDevBranch || PATCHED_BUILD_COMMITS.some((c) => commit.startsWith(c));
+  const isPatchedBranch = PATCHED_BRANCHES.includes(branch);
+  const isPatchedBuild = isPatchedBranch || PATCHED_BUILD_COMMITS.some((c) => commit.startsWith(c));
   const buildSuffix = [branch || null, commit.slice(0, 7) || null].filter(Boolean).join(" ");
   const versionLabel = isPatchedBuild
     ? `${rawVersion}${String(rawVersion).includes("dev") ? "" : "+patched"}${buildSuffix ? ` (${buildSuffix})` : ""}`
@@ -112,7 +119,7 @@ async function runAudioSelfCheck(client, node) {
     );
   } else if (String(rawVersion).startsWith(KNOWN_STALL_VERSION)) {
     warnings.push(
-      `Node runs the ${KNOWN_STALL_VERSION} release (branch "${branch || "?"}", commit ${commit.slice(0, 7) || "?"}), whose DAVE path stalls 100-400ms about once per second (Lavalink issue #1222) - heard as constant crackle. Deploy a build with the koe/libdave update (upstream ghcr.io/lavalink-devs/lavalink:dev, or any build containing koe 3.1.0+); see ${STALL_ISSUE_URL}.`
+      `Node build (branch "${branch || "?"}", commit ${commit.slice(0, 7) || "?"}) pins koe 3.0.x, whose DAVE send path stalls 100-400ms about once per second (Lavalink issue #1222) - heard as constant crackle. Upstream \`dev\` and the 4.2.2 release both still ship koe 3.0.0, so an image pull does not fix this: run a build with koe 3.1.0+ (the deploy workflow builds alula/Lavalink koe-perf, commit f733576). See ${STALL_ISSUE_URL}.`
     );
   } else {
     notes.push(`Lavalink ${rawVersion} supports DAVE`);
@@ -192,35 +199,21 @@ async function runAudioSelfCheck(client, node) {
   return report;
 }
 
-// DSP filters that force a decode, in the order a listener would look for them.
-const FILTER_LABELS = {
-  timescale: "timescale",
-  tremolo: "tremolo",
-  vibrato: "vibrato",
-  rotation: "rotation",
-  distortion: "distortion",
-  karaoke: "karaoke",
-  lowPass: "low-pass",
-};
-
 /**
  * Which filters are active on this player, by name, so the audit can say why a
  * guild is re-encoding instead of only that it is.
+ *
+ * Delegates to the audio-quality guard so the audit and the passthrough
+ * decision can never disagree. Reading `filterManager.data` for truthiness (as
+ * this did) is true for every default filter object, so a clean player was
+ * reported as "DSP filter: timescale, tremolo, vibrato, rotation, karaoke,
+ * low-pass" and the real cause of audible drops was masked.
  *
  * @param {import("lavalink-client").Player} player
  * @returns {string[]}
  */
 function activeFilterNames(player) {
-  const data = player?.filterManager?.data || {};
-  const names = [];
-  for (const [key, label] of Object.entries(FILTER_LABELS)) {
-    if (data[key]) names.push(label);
-  }
-  const equalizer = Array.isArray(data.equalizer) ? data.equalizer : [];
-  const bands = equalizer.filter((band) => Number(band?.gain) !== 0);
-  if (bands.length) names.push(`equalizer (${bands.length} band${bands.length === 1 ? "" : "s"})`);
-  if (data.volume && Number(data.volume) !== 1) names.push("volume filter");
-  return names;
+  return audioQuality.activeFilterNames(player);
 }
 
 /**

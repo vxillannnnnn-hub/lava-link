@@ -25,11 +25,15 @@
 #   second, which listeners hear as constant crackling / micro-dropouts even
 #   though ping is low.
 #   See https://github.com/lavalink-devs/Lavalink/issues/1222
-#   koe 3.1.0 serializes DAVE encryption (the libdave encryptor is not
-#   reentrant) and binds the DAVE manager to the live gateway connection.
-#   Upstream merged the koe/libdave update in PR #1234 and publishes that build
-#   to ghcr.io/lavalink-devs/lavalink:dev, which is what the deploy workflow
-#   and docker-compose run; the bot logs the build identity at startup.
+#   koe 3.1.0 is published and contains the fixes (KyokoBot/koe 3.0.0..3.1.0):
+#   "fix a couple of reentrancy/race bugs", "Fix audio cutoff during key
+#   ratchet negotiation", and "udpqueue: Fix packets being sent to the old IP
+#   address after a server change".
+#   It is NOT in any published Lavalink build: `dev` still pins koe 3.0.0 and
+#   PR #1235 (branch koe-perf) is unmerged, so ghcr.io/lavalink-devs/lavalink:dev
+#   still crackles. .github/workflows/main.yml therefore builds koe-perf itself
+#   and falls back to the image only if that build fails; the bot logs the build
+#   identity at startup.
 #
 # JVM (the flags matter as much as the yml):
 #   java -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -Xms1G -Xmx1G \

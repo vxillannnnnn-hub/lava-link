@@ -99,18 +99,104 @@ function isMetadataOnlyTrack(track) {
   return METADATA_ONLY_SOURCES.has(sourceOf(track));
 }
 
+// Name of each filter flag lavalink-client derives from the filter *values*.
+const ACTIVE_FILTER_LABELS = [
+  ["volume", "volume filter"],
+  ["nightcore", "nightcore"],
+  ["vaporwave", "vaporwave"],
+  ["rotation", "rotation"],
+  ["karaoke", "karaoke"],
+  ["tremolo", "tremolo"],
+  ["vibrato", "vibrato"],
+  ["lowPass", "low-pass"],
+  ["nodeLinkEcho", "echo"],
+  ["nodeLinkChorus", "chorus"],
+  ["nodeLinkCompressor", "compressor"],
+  ["nodeLinkHighPass", "high-pass"],
+  ["nodeLinkPhaser", "phaser"],
+  ["nodeLinkSpatial", "spatial"],
+];
+
+/**
+ * Active DSP filters on a player, by human name. Empty array = clean path.
+ *
+ * lavalink-client keeps a *default object for every filter* in
+ * `filterManager.data` (timescale {1,1,1}, tremolo {0,0}, vibrato {0,0},
+ * rotation {0}, karaoke {0,0,0,0}, lowPass {smoothing:0}, ...). Testing those
+ * objects for truthiness therefore reports a completely clean player as
+ * "timescale, tremolo, vibrato, rotation, karaoke, low-pass" - which is exactly
+ * what this guard and the transcode audit used to do. Two consequences:
+ *
+ *   1. every healthy player was logged as "re-encoding audio (no Opus
+ *      passthrough)", and
+ *   2. frameMonitor.recommendFix() checks the filter reason first, so the
+ *      audible crackle was reported as "reset your filters" instead of the
+ *      DAVE send-path stall it actually is.
+ *
+ * The flags in `filterManager.filters` are derived numerically from the values
+ * by `checkFiltersState()`, so they are the authoritative view.
+ *
+ * @param {import("lavalink-client").Player} player
+ * @returns {string[]}
+ */
+function activeFilterNames(player) {
+  const manager = player?.filterManager;
+  if (!manager) return [];
+
+  if (typeof manager.checkFiltersState === "function") {
+    try {
+      manager.checkFiltersState();
+    } catch (_) {
+      // Advisory only: odd filter data must never throw inside an audit.
+    }
+  }
+
+  const names = [];
+  const flags = manager.filters || {};
+  for (const [key, label] of ACTIVE_FILTER_LABELS) {
+    if (flags[key]) names.push(label);
+  }
+  if (flags.lavalinkFilterPlugin?.echo) names.push("echo (plugin)");
+  if (flags.lavalinkFilterPlugin?.reverb) names.push("reverb (plugin)");
+  if (flags.lavalinkLavalinkDspxPlugin?.lowPass) names.push("low-pass (dspx)");
+  if (flags.lavalinkLavalinkDspxPlugin?.highPass) names.push("high-pass (dspx)");
+  if (flags.lavalinkLavalinkDspxPlugin?.normalization) names.push("normalization (dspx)");
+  if (flags.lavalinkLavalinkDspxPlugin?.echo) names.push("echo (dspx)");
+  if (flags.audioOutput && flags.audioOutput !== "stereo") {
+    names.push(`audio output ${flags.audioOutput}`);
+  }
+
+  // timescale is only folded into a flag when nightcore/vaporwave were toggled,
+  // so a plain setSpeed()/setPitch() has to be compared numerically.
+  const timescale = manager.data?.timescale;
+  if (timescale) {
+    if (
+      Number(timescale.speed) !== 1 ||
+      Number(timescale.pitch) !== 1 ||
+      Number(timescale.rate) !== 1
+    ) {
+      names.push("timescale");
+    }
+  }
+  // The default filter data has no distortion entry at all, so its presence
+  // means something set one.
+  if (manager.data?.distortion) names.push("distortion");
+
+  const bands = manager.equalizerBands;
+  if (Array.isArray(bands)) {
+    const active = bands.filter((band) => Number(band?.gain) !== 0).length;
+    if (active) names.push(`equalizer (${active} band${active === 1 ? "" : "s"})`);
+  }
+
+  return names;
+}
+
 /**
  * True when any DSP filter is active. Filters force a PCM decode, so an active
  * filter always means the node re-encodes instead of forwarding Opus frames.
  */
 function hasActiveFilters(player) {
-  const data = player?.filterManager?.data || {};
-  if (data.timescale || data.tremolo || data.vibrato || data.rotation || data.distortion || data.karaoke || data.lowPass) {
-    return true;
-  }
-  if (Array.isArray(data.equalizer) && data.equalizer.some((band) => Number(band?.gain) !== 0)) return true;
-  if (data.volume && Number(data.volume) !== 1) return true;
-  return false;
+  return activeFilterNames(player).length > 0;
 }
 
 /**
@@ -346,6 +432,7 @@ module.exports = {
   OPUS_NATIVE_SOURCES,
   codecOf,
   isOpusNativeTrack,
+  activeFilterNames,
   hasActiveFilters,
   isPassthroughTrack,
   METADATA_ONLY_SOURCES,
