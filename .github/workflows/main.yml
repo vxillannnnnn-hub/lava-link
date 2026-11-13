@@ -8,8 +8,8 @@ on:
       - master
 
 concurrency:
-  group: 247-matrix-engine
-  cancel-in-progress: true
+  group: 247-matrix-engine-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   actions: write
