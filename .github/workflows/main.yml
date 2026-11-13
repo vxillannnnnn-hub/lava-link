@@ -353,6 +353,14 @@ jobs:
       - name: Start Lavalink Node (Java 25 + koe 3.1.0 DAVE send-path fix)
         if: matrix.component == 'lavalink'
         run: |
+          echo "Verifying Lavalink.jar..."
+          if [ ! -f "Lavalink.jar" ]; then
+            echo "::error::Lavalink.jar not found!"
+            exit 1
+          fi
+          ls -lh Lavalink.jar
+          
+          echo "Starting Lavalink..."
           nohup java \
             --enable-native-access=ALL-UNNAMED \
             --sun-misc-unsafe-memory-access=allow \
@@ -380,9 +388,20 @@ jobs:
             -jar Lavalink.jar > lavalink.log 2>&1 &
           echo "LAVALINK_PID=$!" >> $GITHUB_ENV
           echo "Lavalink PID: $!"
+          
+          # Wait 5 seconds and check if process is still running
+          sleep 5
+          if ! kill -0 $! 2>/dev/null; then
+            echo "::error::Lavalink process died immediately after start!"
+            echo "First 50 lines of log:"
+            head -n 50 lavalink.log || echo "No log"
+            exit 1
+          fi
+          echo "✅ Lavalink process is running (PID: $!)"
+          
           # Audio frames are deadline-bound. Bias the node above the runner's
           # background agents and stop the kernel paging the pre-touched heap.
-          sudo renice -n -5 -p "$LAVALINK_PID" || true
+          sudo renice -n -5 -p "$!" || true
           sudo sysctl -w vm.swappiness=1 || true
 
       - name: Wait for Lavalink Ready
@@ -390,19 +409,29 @@ jobs:
         run: |
           echo "Waiting for Lavalink initialization..."
           READY=false
-          for i in {1..30}; do
+          for i in {1..60}; do
+            echo "Check $i/60: Looking for startup confirmation..."
             if grep -q "Lavalink is ready to accept connections" lavalink.log 2>/dev/null || grep -q "Started LauncherKt" lavalink.log 2>/dev/null; then
-              echo "Lavalink initialized successfully!"
+              echo "✅ Lavalink initialized successfully!"
               READY=true
               break
             fi
-            sleep 2
+            # Show last few log lines for debugging
+            if [ $i -eq 10 ] || [ $i -eq 30 ] || [ $i -eq 50 ]; then
+              echo "Last 10 lines of log:"
+              tail -n 10 lavalink.log 2>/dev/null || echo "No log yet"
+            fi
+            sleep 3
           done
           if [ "$READY" = "true" ]; then
-            echo "Lavalink is online and listening!"
+            echo "✅ Lavalink is online and listening!"
           else
-            echo "::error::Lavalink startup timed out!"
-            tail -n 40 lavalink.log || true
+            echo "::error::Lavalink startup timed out after 3 minutes!"
+            echo "Showing last 50 lines of log:"
+            tail -n 50 lavalink.log || echo "No log file found"
+            echo ""
+            echo "Checking if process is still running:"
+            ps aux | grep -i lavalink || echo "Process not found"
             exit 1
           fi
 
