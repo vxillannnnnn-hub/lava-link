@@ -109,16 +109,16 @@ module.exports = {
 
       // Cascading multi-engine fallback to guarantee a track is found
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: spsearch: }, interaction.user);
+        resolved = await player.search({ query: `spsearch:${query}` }, interaction.user);
       }
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: jssearch: }, interaction.user);
+        resolved = await player.search({ query: `jssearch:${query}` }, interaction.user);
       }
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: ytmsearch: }, interaction.user);
+        resolved = await player.search({ query: `ytmsearch:${query}` }, interaction.user);
       }
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: ytsearch: }, interaction.user);
+        resolved = await player.search({ query: `ytsearch:${query}` }, interaction.user);
       }
 
       return resolved;
