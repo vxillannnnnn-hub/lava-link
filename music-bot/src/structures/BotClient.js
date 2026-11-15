@@ -81,7 +81,45 @@ class BotClient extends Client {
     this.lavalink = initLavalink(this);
 
     // Forward raw Discord gateway packets directly to Lavalink for Voice Server Update / Voice State Update
-    this.on("raw", (data) => this.lavalink.sendRawData(data));
+    const pendingVoiceUpdates = [];
+    this.on("raw", (data) => {
+      if (data?.t !== "VOICE_STATE_UPDATE" && data?.t !== "VOICE_SERVER_UPDATE") return;
+      try {
+        this.lavalink.sendRawData(data);
+      } catch (err) {
+        if (err?.message?.includes("not ready or not up to date")) {
+          pendingVoiceUpdates.push(data);
+          const flushTimer = setTimeout(() => {
+            while (pendingVoiceUpdates.length > 0) {
+              const item = pendingVoiceUpdates.shift();
+              try {
+                this.lavalink.sendRawData(item);
+              } catch (_) {
+                break;
+              }
+            }
+          }, 500);
+          flushTimer.unref?.();
+        } else {
+          logger.debug("[Lavalink] sendRawData error:", err?.message || err);
+        }
+      }
+    });
+
+    // Flush any pending voice updates as soon as the node connects
+    this.lavalink.nodeManager.on("connect", () => {
+      const flush = () => {
+        while (pendingVoiceUpdates.length > 0) {
+          const item = pendingVoiceUpdates.shift();
+          try {
+            this.lavalink.sendRawData(item);
+          } catch (_) {
+            break;
+          }
+        }
+      };
+      setTimeout(flush, 150);
+    });
 
     // Register with multiBotCoordinator once logged in
     this.once(Events.ClientReady || "clientReady", () => {

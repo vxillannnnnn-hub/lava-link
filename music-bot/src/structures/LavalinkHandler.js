@@ -22,6 +22,22 @@ const { reconnect247 } = require("../utils/reconnect247");
 // Resilient Monkey-Patching for LavalinkNode & Player (Self-Healing Audio Engine)
 // Prevents unhandled promise rejections and auto-retries transient network timeouts
 // =============================================================================
+if (LavalinkManager && LavalinkManager.prototype && !LavalinkManager.prototype._patchedResilientSendRaw) {
+  LavalinkManager.prototype._patchedResilientSendRaw = true;
+  const originalSendRawData = LavalinkManager.prototype.sendRawData;
+  LavalinkManager.prototype.sendRawData = function (data) {
+    try {
+      return originalSendRawData.call(this, data);
+    } catch (err) {
+      if (err?.message?.includes("not ready or not up to date")) {
+        // Safe to ignore: node WebSocket is still handshaking sessionId with Lavalink server
+        return;
+      }
+      throw err;
+    }
+  };
+}
+
 if (LavalinkNode && LavalinkNode.prototype && !LavalinkNode.prototype._patchedResilientRequest) {
   LavalinkNode.prototype._patchedResilientRequest = true;
   const originalRawRequest = LavalinkNode.prototype.rawRequest;
@@ -226,6 +242,12 @@ function initLavalink(client) {
     logger.lavalink(
       `Connected to node: ${node.id} (${node.options.host}:${node.options.port}) [v${node.info?.version?.semver || "4.x"}]`
     );
+
+    // Ensure Lavalink v4 op: "ready" packet has arrived and sessionId is populated
+    for (let i = 0; i < 40; i++) {
+      if (node.sessionId) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
 
     // Activate Lavalink v4 Session Resuming for instantaneous (<50ms) recovery
     try {
