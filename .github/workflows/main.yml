@@ -1,4 +1,4 @@
-name: 24/7 Production Matrix Engine
+name: 24/7 Production Engine (Lavalink + Bot Fleet)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
       - master
 
 concurrency:
-  group: 247-matrix-engine-${{ github.run_id }}
+  group: 247-production-engine-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -16,14 +16,10 @@ permissions:
   contents: write
 
 jobs:
-  matrix-runner:
-    name: ${{ matrix.component == 'lavalink' && 'Lavalink Audio Node' || 'Discord Music Bot Fleet' }}
+  production-engine:
+    name: 24/7 Unified Runner (Lavalink + Discord Music Bot Fleet)
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [lavalink, music-bot]
     env:
       DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       DISCORD_TOKENS: ${{ secrets.DISCORD_TOKENS }}
@@ -40,62 +36,28 @@ jobs:
 
     steps:
       # ========================================================================
-      # SHARED INITIALIZATION
+      # 1. INITIALIZATION & RUNTIMES
       # ========================================================================
       - name: Checkout Repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
-      # ========================================================================
-      # MATRIX COMPONENT A: LAVALINK AUDIO NODE
-      # ========================================================================
       - name: Setup Java 25 LTS (Lavalink)
-        if: matrix.component == 'lavalink'
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '25'
 
-      # The node must run a build whose koe/libdave carries the DAVE send-path
-      # fix: under DAVE the outgoing voice stream stalls 100-400ms about once a
-      # second (lavalink-devs/Lavalink#1222), heard as constant crackle. The
-      # 4.2.2 release ships koe 3.0.0-pre6 and still has it; upstream `dev` has
-      # koe/libdave updated (PR #1234 and later) and publishes that build itself.
-      #
-      # Pull upstream's own image instead of a third-party PR image: first-party,
-      # and it tracks the fix. The resolved digest is logged so every run is
-      # attributable to one immutable image. To pin instead of tracking, set the
-      # LAVALINK_IMAGE repository variable to a digest ref
-      # (ghcr.io/lavalink-devs/lavalink@sha256:...).
-      # ------------------------------------------------------------------------
-      # koe 3.1.0 node build - the actual fix for the crackle
-      #
-      # The "flickering and crackling" every listener hears is the koe 3.0 send
-      # path, tracked as lavalink-devs/Lavalink#1222: with DAVE (Discord's
-      # mandatory E2EE voice) active, frames are encrypted on the JVM thread
-      # instead of being drained from the pre-filled native UDP queue, so any JVM
-      # hiccup lands on the wire as a gap. Measured on an idle host: 37-38
-      # packets/s instead of the expected 50, worst gaps 300-500ms, while the
-      # pacing between stalls is a perfect 20ms. bufferDurationMs does not mask
-      # it because the DAVE frames never enter that buffer.
-      #
-      # koe 3.1.0 is published and contains the fixes (KyokoBot/koe 3.0.0..3.1.0):
-      #   "fix a couple of reentrancy/race bugs"
-      #   "Fix audio cutoff during key ratchet negotiation"
-      #   "udpqueue: Fix packets being sent to the old IP address after a server
-      #    change"
-      # Lavalink `dev` still pins koe 3.0.0 and the bump (PR #1235, branch
-      # koe-perf) is unmerged - "This branch has not been deployed" - so every
-      # published image, including ghcr.io/lavalink-devs/lavalink:dev, still has
-      # the stall. Build the PR head here instead.
-      #
-      # Deliberately non-fatal: if the build fails for any reason the image step
-      # below runs exactly as before, so a broken upstream PR can never cost the
-      # 24/7 session its node.
-      # ------------------------------------------------------------------------
+      - name: Setup Node.js 20.x LTS (Music Bot)
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      # ========================================================================
+      # 2. LAVALINK BUILD & CONFIGURATION
+      # ========================================================================
       - name: Restore Gradle Cache (Lavalink koe build)
-        if: matrix.component == 'lavalink'
         uses: actions/cache@v5
         with:
           path: |
@@ -104,7 +66,6 @@ jobs:
           key: lavalink-koe-gradle-${{ runner.os }}-${{ vars.LAVALINK_KOE_REF || 'f7335760359f2386cab23eefe66284177f969ff5' }}
 
       - name: Build Lavalink with koe 3.1.0 (DAVE send-path fix)
-        if: matrix.component == 'lavalink'
         id: koe-build
         continue-on-error: true
         timeout-minutes: 25
@@ -119,11 +80,9 @@ jobs:
           git init -q "$WORK"
           cd "$WORK"
           git remote add origin https://github.com/alula/Lavalink.git
-          # Accept either a commit sha or a branch name; GitHub serves a reachable
-          # sha, but the branch is the fallback if that ever stops working.
           if ! git fetch -q --depth 1 origin "$KOE_REF"; then
             if ! git fetch -q --depth 1 origin koe-perf; then
-              echo "::warning::Could not fetch koe-perf ($KOE_REF); falling back to the upstream image."
+              echo "::warning::Could not fetch koe-perf ($KOE_REF); falling back to upstream image."
               exit 0
             fi
           fi
@@ -131,14 +90,13 @@ jobs:
           KOE_PIN=$(grep -oE 'version\("koe", "[^"]+"' settings.gradle.kts | head -1 || true)
           echo "Building commit $(git rev-parse --short HEAD) - ${KOE_PIN:-koe version unknown}"
           chmod +x ./gradlew
-          # Project path is :Lavalink-Server (hyphen), source dir LavalinkServer.
           if ! ./gradlew --no-daemon --console=plain :Lavalink-Server:bootJar; then
-            echo "::warning::Gradle build of the koe 3.1.0 node failed; falling back to the upstream image."
+            echo "::warning::Gradle build of koe 3.1.0 node failed; falling back to upstream image."
             exit 0
           fi
           JAR=$(ls -1 LavalinkServer/build/libs/*.jar 2>/dev/null | grep -v -- '-plain' | head -1 || true)
           if [ -z "$JAR" ]; then
-            echo "::warning::Gradle produced no jar; falling back to the upstream image."
+            echo "::warning::Gradle produced no jar; falling back to upstream image."
             exit 0
           fi
           cp "$JAR" "$GITHUB_WORKSPACE/Lavalink.jar"
@@ -147,7 +105,7 @@ jobs:
           echo "KOE_LABEL=koe 3.1.0 (self-built, DAVE send-path fix)" >> "$GITHUB_ENV"
 
       - name: Download Upstream Lavalink Node Build (fallback)
-        if: matrix.component == 'lavalink' && steps.koe-build.outputs.built != 'true'
+        if: steps.koe-build.outputs.built != 'true'
         id: lavalink-image
         env:
           LAVALINK_IMAGE: ${{ vars.LAVALINK_IMAGE || 'ghcr.io/lavalink-devs/lavalink:dev' }}
@@ -178,12 +136,7 @@ jobs:
           ls -lh Lavalink.jar
           test "$(wc -c < Lavalink.jar)" -gt 10000000 || { echo "::error::Extracted Lavalink.jar looks invalid"; exit 1; }
 
-      # A moving `dev` tag is only trustworthy if the build is identifiable, so
-      # the jar's koe/libdave versions are read out of the shaded jar before the
-      # node starts. javap prints the compile-time constants when the build
-      # exposes them; libdave natives are always visible as jar entries.
       - name: Log Lavalink Build Identity (koe / libdave / jar)
-        if: matrix.component == 'lavalink'
         env:
           IMAGE: ${{ steps.lavalink-image.outputs.image }}
           DIGEST: ${{ steps.lavalink-image.outputs.digest }}
@@ -195,16 +148,9 @@ jobs:
             | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
           DAVE_VERSION=$(javap -constants -cp Lavalink.jar moe.kyokobot.libdave.NativeDave 2>/dev/null \
             | grep -oiE 'VERSION[^=]*= *"[^"]+"' | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
-          # libdave is not necessarily inside the shaded jar: upstream's image
-          # may ship the natives beside it, and koe unpacks bundled ones at
-          # runtime. Count both places, and never fail on a zero - refusing to
-          # start the node is worse than a DAVE question the running node
-          # answers itself via /v4/info and the bot's [AudioSelfCheck] line.
           JAR_ENTRIES=$( { unzip -l Lavalink.jar 2>/dev/null || jar tf Lavalink.jar 2>/dev/null; } \
             | grep -ci 'libdave' | tr -dc '0-9' || true )
           JAR_ENTRIES=${JAR_ENTRIES:-0}
-          # Only the image fallback has an image to inspect; a self-built jar
-          # carries its libdave natives inside the boot jar.
           if [ -n "${IMAGE:-}" ]; then
             FS_ENTRIES=$(docker run --rm --entrypoint sh "$IMAGE" -c \
               'find /opt/Lavalink /app -iname "*libdave*" 2>/dev/null' 2>/dev/null \
@@ -238,15 +184,7 @@ jobs:
             echo "| libdave | \`${DAVE_VERSION:-unknown}\` (${DAVE_NATIVES} entries: ${JAR_ENTRIES} jar, ${FS_ENTRIES} image) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "${KOE_VERSION}" ]; then
-            echo "::warning::Could not read a koe VERSION constant from the jar; confirm the #1222 fix by listening for 100-400ms stalls on one live track."
-          fi
-          if [ "${DAVE_NATIVES}" -eq 0 ]; then
-            echo "::warning::No libdave entries in the jar or beside it; DAVE support cannot be confirmed offline. Starting the node anyway - /v4/info and the bot's [AudioSelfCheck] line are the authority, and 100-400ms stalls are the symptom to listen for."
-          fi
-
       - name: Configure application.yml
-        if: matrix.component == 'lavalink'
         env:
           YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || '' }}
           SP_DC_COOKIE: ${{ secrets.SPOTIFY_SP_DC || '' }}
@@ -265,7 +203,6 @@ jobs:
           fi
 
       - name: Optimize Linux Kernel Network & DNS (Ultra-Low Latency)
-        if: matrix.component == 'lavalink'
         run: |
           echo "Applying Linux kernel socket and network latency optimizations..."
           sudo modprobe tcp_bbr || true
@@ -292,7 +229,6 @@ jobs:
           sudo sed -i '1i nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8' /etc/resolv.conf || true
 
       - name: Install Cloudflare Tunnel (cloudflared)
-        if: matrix.component == 'lavalink'
         run: |
           set -e
           echo "Fetching latest cloudflared release via GitHub API..."
@@ -303,12 +239,8 @@ jobs:
           DOWNLOAD_URL=$(echo "$LATEST_JSON" | python3 -c "import sys,json;data=json.load(sys.stdin);[print(a['url']) for a in data.get('assets',[]) if a['name']=='cloudflared-linux-amd64']" 2>/dev/null || true)
           if [ -z "$DOWNLOAD_URL" ]; then
             echo "::error::Could not find cloudflared-linux-amd64 asset URL"
-            echo "Release tag: $CLOUDFLARED_VERSION"
-            echo "Assets:"
-            echo "$LATEST_JSON" | python3 -c "import sys,json;d=json.load(sys.stdin);[print(a['name']) for a in d.get('assets',[])]" 2>/dev/null || true
             exit 1
           fi
-          echo "Download URL: $DOWNLOAD_URL"
           MAX_RETRIES=3
           RETRY_DELAY=3
           SUCCESS=false
@@ -318,24 +250,17 @@ jobs:
               -H "Accept: application/octet-stream" \
               "$DOWNLOAD_URL" -o /usr/local/bin/cloudflared; then
               SIZE=$(wc -c < /usr/local/bin/cloudflared 2>/dev/null || echo 0)
-              echo "Downloaded $SIZE bytes"
               if [ "$SIZE" -gt 1000000 ]; then
                 if chmod +x /usr/local/bin/cloudflared && [ -x /usr/local/bin/cloudflared ]; then
                   echo "✅ cloudflared installed (size: $SIZE bytes)"
                   SUCCESS=true
                   break
                 fi
-              else
-                echo "File too small ($SIZE bytes), likely HTML error"
-                head -c 200 /usr/local/bin/cloudflared | cat -v
               fi
-            else
-              echo "Download failed"
             fi
             [ $attempt -lt $MAX_RETRIES ] && sleep $RETRY_DELAY
           done
           if [ "$SUCCESS" = "false" ]; then
-            echo "::warning::curl failed, trying wget..."
             if wget -q --timeout=30 --tries=3 -O /usr/local/bin/cloudflared "$DOWNLOAD_URL" 2>/dev/null; then
               SIZE=$(wc -c < /usr/local/bin/cloudflared 2>/dev/null || echo 0)
               if [ "$SIZE" -gt 1000000 ]; then
@@ -350,22 +275,18 @@ jobs:
             exit 1
           fi
 
-      - name: Start Lavalink Node (Java 25 + koe 3.1.0 DAVE send-path fix)
-        if: matrix.component == 'lavalink'
+      - name: Start Lavalink Node (Java 25 + koe 3.1.0)
         run: |
-          echo "Verifying Lavalink.jar..."
           if [ ! -f "Lavalink.jar" ]; then
             echo "::error::Lavalink.jar not found!"
             exit 1
           fi
-          ls -lh Lavalink.jar
-          
-          echo "Starting Lavalink..."
+          echo "Starting Lavalink process..."
           nohup java \
             --enable-native-access=ALL-UNNAMED \
             --sun-misc-unsafe-memory-access=allow \
             -XX:+UseZGC \
-            -Xms2G \
+            -Xms1G \
             -Xmx2G \
             -XX:+AlwaysPreTouch \
             -XX:+UseStringDeduplication \
@@ -386,26 +307,21 @@ jobs:
             -Dio.netty.noPreferDirect=false \
             -Dio.netty.recycler.maxCapacityPerThread=4096 \
             -jar Lavalink.jar > lavalink.log 2>&1 &
-          echo "LAVALINK_PID=$!" >> $GITHUB_ENV
-          echo "Lavalink PID: $!"
+          LAVALINK_PID=$!
+          echo "LAVALINK_PID=$LAVALINK_PID" >> $GITHUB_ENV
+          echo "Lavalink PID: $LAVALINK_PID"
           
-          # Wait 5 seconds and check if process is still running
-          sleep 5
-          if ! kill -0 $! 2>/dev/null; then
+          sleep 4
+          if ! kill -0 $LAVALINK_PID 2>/dev/null; then
             echo "::error::Lavalink process died immediately after start!"
-            echo "First 50 lines of log:"
             head -n 50 lavalink.log || echo "No log"
             exit 1
           fi
-          echo "✅ Lavalink process is running (PID: $!)"
-          
-          # Audio frames are deadline-bound. Bias the node above the runner's
-          # background agents and stop the kernel paging the pre-touched heap.
-          sudo renice -n -5 -p "$!" || true
+          echo "✅ Lavalink process is running (PID: $LAVALINK_PID)"
+          sudo renice -n -5 -p "$LAVALINK_PID" || true
           sudo sysctl -w vm.swappiness=1 || true
 
       - name: Wait for Lavalink Ready
-        if: matrix.component == 'lavalink'
         run: |
           echo "Waiting for Lavalink initialization..."
           READY=false
@@ -416,194 +332,101 @@ jobs:
               READY=true
               break
             fi
-            # Show last few log lines for debugging
-            if [ $i -eq 10 ] || [ $i -eq 30 ] || [ $i -eq 50 ]; then
-              echo "Last 10 lines of log:"
-              tail -n 10 lavalink.log 2>/dev/null || echo "No log yet"
-            fi
             sleep 3
           done
           if [ "$READY" = "true" ]; then
-            echo "✅ Lavalink is online and listening!"
+            echo "✅ Lavalink is online and listening on 127.0.0.1:4998!"
           else
             echo "::error::Lavalink startup timed out after 3 minutes!"
-            echo "Showing last 50 lines of log:"
             tail -n 50 lavalink.log || echo "No log file found"
-            echo ""
-            echo "Checking if process is still running:"
-            ps aux | grep -i lavalink || echo "Process not found"
             exit 1
           fi
 
-      # /v4/info is the authoritative build identity of the running node: the
-      # jar's semver is 4.2.2 on a dev build too, so branch + commit is what
-      # proves which koe/libdave the process actually loaded.
       - name: Log Lavalink Runtime Identity (/v4/info)
-        if: matrix.component == 'lavalink'
         run: |
           INFO=$(curl -sS --max-time 10 -H "Authorization: ${NODE_PASSWORD}" \
             http://127.0.0.1:4998/v4/info || true)
-          if [ -z "$INFO" ]; then
-            echo "::warning::/v4/info did not answer; skipping the identity log."
-            exit 0
+          if [ -n "$INFO" ]; then
+            {
+              echo ""
+              echo "## Lavalink runtime identity"
+              echo "| Field | Value |"
+              echo "|---|---|"
+              echo "| Version | \`$(echo "$INFO" | jq -r '.version.semver // (.version | tostring)')\` |"
+              echo "| Git branch | \`$(echo "$INFO" | jq -r '.git.branch // "?"')\` |"
+              echo "| Git commit | \`$(echo "$INFO" | jq -r '(.git.commit // "?")[0:9]')\` |"
+              echo "| Lavaplayer | \`$(echo "$INFO" | jq -r '.lavaplayer // "?"')\` |"
+              echo "| JVM | \`$(echo "$INFO" | jq -r '.jvm // "?"')\` |"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          {
-            echo ""
-            echo "## Lavalink runtime identity"
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Version | \`$(echo "$INFO" | jq -r '.version.semver // (.version | tostring)')\` |"
-            echo "| Git branch | \`$(echo "$INFO" | jq -r '.git.branch // "?"')\` |"
-            echo "| Git commit | \`$(echo "$INFO" | jq -r '(.git.commit // "?")[0:9]')\` |"
-            echo "| Lavaplayer | \`$(echo "$INFO" | jq -r '.lavaplayer // "?"')\` |"
-            echo "| JVM | \`$(echo "$INFO" | jq -r '.jvm // "?"')\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "Lavalink $(echo "$INFO" | jq -r '.version.semver // (.version | tostring)')" \
-            "branch $(echo "$INFO" | jq -r '.git.branch // "?"')" \
-            "commit $(echo "$INFO" | jq -r '(.git.commit // "?")[0:9]')" \
-            "lavaplayer $(echo "$INFO" | jq -r '.lavaplayer // "?"')" \
-            "jvm $(echo "$INFO" | jq -r '.jvm // "?"')"
-          echo "plugins: $(echo "$INFO" | jq -r '[.plugins[]? | "\(.name)@\(.version)"] | join(", ")')"
 
-      - name: Start Cloudflare Tunnel & Expose Lavalink (Low-Jitter HTTP/2 Transport)
-        if: matrix.component == 'lavalink'
+      - name: Start Cloudflare Tunnel (External Access)
         id: tunnel
-        shell: bash
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
           CF_CUSTOM_DOMAIN: ${{ secrets.CLOUDFLARE_CUSTOM_DOMAIN }}
         run: |
           if [ -n "$CF_TOKEN" ]; then
-            echo "Starting persistent Cloudflare Named Tunnel (4 HA Edge Connections)..."
+            echo "Starting persistent Cloudflare Named Tunnel..."
             nohup cloudflared tunnel \
-              --protocol http2 \
               --edge-ip-version auto \
+              --protocol http2 \
               --ha-connections 4 \
               --heartbeat-count 5 \
               --heartbeat-interval 5s \
               run --token "$CF_TOKEN" > tunnel.log 2>&1 &
             TUNNEL_PID=$!
             echo "TUNNEL_PID=$TUNNEL_PID" >> $GITHUB_ENV
-            echo "Tunnel PID: $TUNNEL_PID"
             sleep 3
-            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-              echo "::error::Tunnel process failed to start!"
-              cat tunnel.log || true
-              exit 1
-            fi
-            echo "Tunnel started successfully with PID $TUNNEL_PID"
             HOST="${CF_CUSTOM_DOMAIN:-lavalink.opendrive.indevs.in}"
             echo "PUBLIC_HOST=$HOST" >> $GITHUB_ENV
             echo "PUBLIC_PORT=443" >> $GITHUB_ENV
             echo "PUBLIC_SECURE=true" >> $GITHUB_ENV
             echo "PUBLIC_URL=https://$HOST" >> $GITHUB_ENV
           else
-            echo "Starting temporary Cloudflare Quick Tunnel (4 HA Edge Connections)..."
+            echo "Starting temporary Cloudflare Quick Tunnel..."
             nohup cloudflared tunnel \
               --protocol http2 \
               --edge-ip-version auto \
               --ha-connections 4 \
-              --heartbeat-count 5 \
-              --heartbeat-interval 5s \
               --url http://127.0.0.1:4998 > tunnel.log 2>&1 &
             TUNNEL_PID=$!
             echo "TUNNEL_PID=$TUNNEL_PID" >> $GITHUB_ENV
-            echo "Tunnel PID: $TUNNEL_PID"
-            sleep 3
-            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-              echo "::error::Tunnel process failed to start!"
-              cat tunnel.log || true
-              exit 1
-            fi
             TUNNEL_URL=""
             for i in {1..30}; do
               TUNNEL_URL=$(grep -oE 'https://[-a-zA-Z0-9@:%._+~#=]+\.trycloudflare\.com' tunnel.log | head -n 1 || true)
               if [ -n "$TUNNEL_URL" ]; then break; fi
               sleep 2
             done
-            if [ -z "$TUNNEL_URL" ]; then
-              echo "::error::Failed to obtain Quick Tunnel URL!"
-              cat tunnel.log || true
-              exit 1
-            fi
             HOST=$(echo "$TUNNEL_URL" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
-            echo "PUBLIC_HOST=$HOST" >> $GITHUB_ENV
+            echo "PUBLIC_HOST=${HOST:-127.0.0.1}" >> $GITHUB_ENV
             echo "PUBLIC_PORT=443" >> $GITHUB_ENV
             echo "PUBLIC_SECURE=true" >> $GITHUB_ENV
-            echo "PUBLIC_URL=https://$HOST" >> $GITHUB_ENV
+            echo "PUBLIC_URL=${TUNNEL_URL:-http://127.0.0.1:4998}" >> $GITHUB_ENV
           fi
 
       - name: Announce Lavalink Connection Details
-        if: matrix.component == 'lavalink'
         run: |
           echo "======================================================"
-          echo "🎉 LAVALINK PUBLIC NODE ONLINE: $PUBLIC_URL"
+          echo "🎉 LAVALINK NODE ONLINE: 127.0.0.1:4998 (Local) | $PUBLIC_URL (Public)"
           echo "======================================================"
-          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
-          ## 👑 Lavalink Node Active
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## 👑 Lavalink Node Active (Unified Single-Runner)
           | Parameter | Value |
           |---|---|
-          | **Host** | `${{ env.PUBLIC_HOST }}` |
-          | **Port** | `443` |
-          | **Password** | `${{ env.NODE_PASSWORD }}` |
-          | **REST Endpoint** | `${{ env.PUBLIC_URL }}` |
-          | **WebSocket Endpoint** | `wss://${{ env.PUBLIC_HOST }}:443/v4/websocket` |
-          | **GC Engine** | `Java 25 Generational ZGC (<1ms)` |
-          | **Voice Transport** | `Netty Native C-Epoll + ${KOE_LABEL:-koe unknown}` |
-          | **Session #** | `${{ github.run_number }}` |
+          | **Local Direct Host** | \`127.0.0.1:4998\` (0ms IPC latency) |
+          | **Public Host** | \`${{ env.PUBLIC_HOST }}\` |
+          | **Public Port** | \`${{ env.PUBLIC_PORT }}\` |
+          | **Password** | \`${{ env.NODE_PASSWORD }}\` |
+          | **Public URL** | \`${{ env.PUBLIC_URL }}\` |
+          | **GC Engine** | Java 25 Generational ZGC (<1ms) |
+          | **Session #** | \`${{ github.run_number }}\` |
           EOF
-
-          cat << EOF > NODE_STATUS.md
-          # 🟢 Live Public Lavalink Node
-          > **Status**: ONLINE 🟢  
-          > **Session Run**: #${{ github.run_number }}  
-          > **Last Started**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          ### 🌐 Public Connection Details
-          | Setting | Value |
-          |---|---|
-          | **Host** | \`$PUBLIC_HOST\` |
-          | **Port** | \`443\` |
-          | **Password** | \`$NODE_PASSWORD\` |
-          | **SSL / Secure** | \`true\` |
-          | **REST URI** | \`$PUBLIC_URL\` |
-          | **WebSocket URI** | \`wss://$PUBLIC_HOST:443/v4/websocket\` |
-          | **GC Engine** | \`Java 25 Generational ZGC (<1ms pauses)\` |
-          | **Transport** | \`Netty Native Linux Epoll + ${KOE_LABEL:-koe unknown}\` |
-          EOF
-          sed -i 's/^[ ]\{10\}//' NODE_STATUS.md
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add NODE_STATUS.md
-          if ! git diff --staged --quiet; then
-            git commit -m "docs: update live public node status [skip ci]"
-          fi
-          git push origin ${{ github.ref_name }} --force-with-lease || true
-
-      - name: Keep Lavalink Alive & Monitor (5.5 Hours)
-        if: matrix.component == 'lavalink'
-        run: |
-          END_TIME=$((SECONDS + 330 * 60))
-          tail -f lavalink.log &
-          while [ $SECONDS -lt $END_TIME ]; do
-            if ! kill -0 $LAVALINK_PID 2>/dev/null; then
-              echo "::error::Lavalink process exited unexpectedly!"
-              tail -n 50 lavalink.log || true
-              exit 1
-            fi
-            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-              echo "::error::Tunnel process exited unexpectedly!"
-              tail -n 50 tunnel.log || true
-              exit 1
-            fi
-            sleep 30
-          done
 
       # ========================================================================
-      # MATRIX COMPONENT B: DISCORD MUSIC BOT FLEET
+      # 3. DISCORD BOT FLEET SETUP & PREPARATION
       # ========================================================================
       - name: Restore Bot Database & Persistent Storage Cache
-        if: matrix.component == 'music-bot'
-        id: restore-bot-data
         uses: actions/cache/restore@v5
         with:
           path: music-bot/data
@@ -612,133 +435,65 @@ jobs:
             bot-persistent-v6-${{ github.ref_name }}-
 
       - name: Restore Persistent Bot Data from Artifact Backup
-        if: matrix.component == 'music-bot'
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p music-bot/data
           mkdir -p /tmp/artifact_data
-          echo "Attempting to download latest persistent artifact backup..."
           if gh run download --name bot-backup-latest --dir /tmp/artifact_data 2>/dev/null; then
             echo "✅ Successfully downloaded bot-backup-latest artifact! Restoring data files..."
             cp -rf /tmp/artifact_data/* music-bot/data/ 2>/dev/null || true
             rm -rf /tmp/artifact_data
           else
-            echo "No prior bot-backup-latest artifact found (or fresh runner). Using repo storage."
+            echo "No prior bot-backup-latest artifact found. Using fresh storage."
           fi
-          echo "Persistent data files on disk:"
-          ls -la music-bot/data || true
-
-      - name: Setup Node.js 20.x LTS (Music Bot)
-        if: matrix.component == 'music-bot'
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
 
       - name: Install Build Tools for Native Modules
-        if: matrix.component == 'music-bot'
         run: |
-          echo "📥 Installing build tools..."
+          echo "Installing build tools..."
           sudo apt-get update -qq
           sudo apt-get install -y build-essential python3 python3-pip
-          
-          echo "🔧 Installing node-gyp globally..."
           npm install -g node-gyp
-          
-          echo "✅ Build environment ready"
-          node-gyp --version
-          python3 --version
-          gcc --version
 
       - name: Install Dependencies & Rebuild Native Modules
-        if: matrix.component == 'music-bot'
         run: |
           cd music-bot
-          echo "📦 Installing dependencies..."
-          
-          # Regenerate package-lock.json if out of sync
+          echo "Installing bot dependencies..."
           if ! npm ci --prefer-offline --no-audit 2>&1; then
-            echo "⚠️  package-lock.json out of sync, regenerating..."
+            echo "Regenerating lockfile..."
             rm -f package-lock.json
             npm install --package-lock-only
-            echo "✅ package-lock.json regenerated"
           fi
-          
-          # Now install with the correct lock file
           npm ci --prefer-offline --no-audit
           
-          echo "🔧 Checking installed better-sqlite3 version and bindings..."
-          npm list better-sqlite3 || true
-          
-          echo "🔨 Force rebuilding native modules from source..."
-          # Remove any prebuilt binaries to ensure fresh build
+          echo "Rebuilding better-sqlite3 and sharp native modules..."
           rm -rf node_modules/better-sqlite3/build node_modules/better-sqlite3/prebuilds 2>/dev/null || true
           rm -rf node_modules/sharp/build node_modules/sharp/vendor 2>/dev/null || true
+          npm rebuild better-sqlite3 --build-from-source
+          npm rebuild sharp --build-from-source
           
-          # Rebuild with verbose output to see any errors
-          npm rebuild better-sqlite3 --build-from-source --verbose
-          npm rebuild sharp --build-from-source --verbose
-          
-          echo "✅ Verifying better-sqlite3 build..."
-          ls -la node_modules/better-sqlite3/build/Release/ || echo "⚠️ No Release build found"
-          
-          echo "🧪 Testing better-sqlite3 module..."
           node -e "const db = require('better-sqlite3')(':memory:'); db.close(); console.log('✅ better-sqlite3 test passed')" || {
             echo "❌ better-sqlite3 test FAILED!"
             exit 1
           }
-          
           cd ..
 
-      - name: Parse Lavalink Connection from NODE_STATUS.md
-        if: matrix.component == 'music-bot'
-        run: |
-          # Wait up to 120s for Lavalink node to initialize if using dynamic tunnel
-          if [ -z "${{ secrets.LAVALINK_HOST }}" ]; then
-            echo "Waiting for Lavalink node to be ready..."
-            for i in {1..24}; do
-              git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || true
-              if [ -f "NODE_STATUS.md" ]; then
-                echo "NODE_STATUS.md found!"
-                break
-              fi
-              echo "Attempt $i/24: NODE_STATUS.md not found yet, waiting 5s..."
-              sleep 5
-            done
-            if [ ! -f "NODE_STATUS.md" ]; then
-              echo "⚠️ Warning: NODE_STATUS.md not found after 2 minutes. Lavalink may not be ready yet."
-            fi
-          fi
-          HOST=""
-          PASSWORD=""
-          if [ -f "NODE_STATUS.md" ]; then
-            HOST=$(grep -o '`https://[^`]*`' NODE_STATUS.md | sed -e 's|`https://||' -e 's|`||' | head -n 1 || true)
-            if [ -z "$HOST" ]; then
-              HOST=$(grep -oP '(?<=\*\*Host\*\* \| `)[^`]+' NODE_STATUS.md || true)
-            fi
-            PASSWORD=$(grep -oP '(?<=\*\*Password\*\* \| `)[^`]+' NODE_STATUS.md || true)
-          fi
-          echo "PARSED_HOST=${HOST:-lavalink.opendrive.indevs.in}" >> $GITHUB_ENV
-          echo "PARSED_PORT=443" >> $GITHUB_ENV
-          echo "PARSED_SECURE=true" >> $GITHUB_ENV
-          echo "PARSED_PASSWORD=${PASSWORD:-youshallnotpass}" >> $GITHUB_ENV
-          echo "📡 Lavalink connection: ${HOST:-lavalink.opendrive.indevs.in}:443"
-
       - name: Register Discord Slash Commands
-        if: matrix.component == 'music-bot'
         run: |
           cd music-bot
           node src/deploy-commands.js || true
           cd ..
 
-      - name: Run Music Bot Fleet (5.5 Hours)
-        if: matrix.component == 'music-bot'
+      # ========================================================================
+      # 4. RUN UNIFIED 24/7 FLEET & LAVALINK WATCHDOG (5.5 HOURS)
+      # ========================================================================
+      - name: Run Unified 24/7 Engine (Music Bot Fleet + Local Lavalink)
         env:
-          LAVALINK_HOST: ${{ secrets.LAVALINK_HOST || env.PARSED_HOST }}
-          LAVALINK_PORT: ${{ secrets.LAVALINK_PORT || env.PARSED_PORT }}
-          LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || env.PARSED_PASSWORD }}
-          LAVALINK_SECURE: ${{ secrets.LAVALINK_SECURE || env.PARSED_SECURE }}
+          LAVALINK_HOST: "127.0.0.1"
+          LAVALINK_PORT: "4998"
+          LAVALINK_SECURE: "false"
+          LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
           LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
           RUNNER_LIFETIME_MS: "19800000"
@@ -746,15 +501,34 @@ jobs:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
         run: |
           if [ -z "$DISCORD_TOKEN" ] && [ -z "$DISCORD_TOKENS" ]; then
-            echo "::error::Neither DISCORD_TOKEN nor DISCORD_TOKENS secret is configured! Please configure bot token(s) in repository secrets."
+            echo "::error::Neither DISCORD_TOKEN nor DISCORD_TOKENS is configured in secrets!"
             exit 1
           fi
-          echo "Starting 24/7 Music Bot Fleet connected to Lavalink: $LAVALINK_HOST:$LAVALINK_PORT..."
+
+          # Background watchdog monitoring Lavalink
+          (
+            while kill -0 $LAVALINK_PID 2>/dev/null; do
+              sleep 15
+            done
+            echo "::error::Lavalink process exited unexpectedly during run!"
+            tail -n 50 lavalink.log || true
+          ) &
+          WATCHDOG_PID=$!
+
+          echo "=========================================================="
+          echo "🚀 Starting 24/7 Discord Music Bot Fleet (Direct 127.0.0.1:4998 IPC)"
+          echo "=========================================================="
           cd music-bot
           node src/sharder.js
+          cd ..
 
+          kill $WATCHDOG_PID 2>/dev/null || true
+
+      # ========================================================================
+      # 5. PERSISTENCE & DATA SYNC (ALWAYS EXECUTES ON COMPLETION)
+      # ========================================================================
       - name: Flush Bot Database & Save Active Sessions
-        if: matrix.component == 'music-bot' && always()
+        if: always()
         run: |
           if [ -d "music-bot/data" ]; then
             echo "Flushing SQLite WAL checkpoints & syncing JSON mirrors..."
@@ -765,14 +539,14 @@ jobs:
           fi
 
       - name: Save Bot Database & Active Sessions Cache
-        if: matrix.component == 'music-bot' && always()
+        if: always()
         uses: actions/cache/save@v5
         with:
           path: music-bot/data
           key: bot-persistent-v6-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload Persistent Bot Data Artifact
-        if: matrix.component == 'music-bot' && always()
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: bot-backup-latest
@@ -781,7 +555,7 @@ jobs:
           overwrite: true
 
       - name: Commit and Push Persistent State to Repository
-        if: matrix.component == 'music-bot' && always()
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
         run: |
@@ -790,11 +564,6 @@ jobs:
           cd music-bot
           node -e "try { const db = require('./src/database/db'); db.checkpoint(); db.exportJson(); } catch(e){}" || true
           cd ..
-          
-          # Stage every persistent mirror. bot_247_settings.json was missing from
-          # this list, so the export left it modified; the rebase below then
-          # aborted with "You have unstaged changes" and the push was rejected.
-          # Only *.json mirrors and the SQLite file are tracked; WAL/SHM stay ignored.
           git add -f music-bot/data/*.json music-bot/data/bot.db 2>/dev/null || true
           
           if git diff --staged --quiet; then
@@ -802,13 +571,9 @@ jobs:
           else
             echo "Committing updated persistent state..."
             git commit -m "chore(data): auto-sync bot database & active sessions [skip ci]" || true
-            
-            # Robust push with rebase favoring runtime changes
             for attempt in 1 2 3; do
               echo "Push attempt $attempt..."
               git fetch --unshallow 2>/dev/null || git fetch origin ${{ github.ref_name }} || true
-              # The bot can rewrite a mirror between the commit and this loop;
-              # autostash keeps the tree clean instead of aborting the rebase.
               if git -c rebase.autoStash=true rebase -X ours origin/${{ github.ref_name }}; then
                 if git push https://x-access-token:${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}; then
                   echo "✅ Persistent state pushed successfully!"
@@ -826,22 +591,11 @@ jobs:
             done
           fi
 
-  # ============================================================================
-  # 24/7 SELF-HEALING RECOVERY LOOP (Runs Once for Both Services)
-  # ============================================================================
-  recover:
-    name: 24/7 Self-Healing Dispatcher
-    needs: matrix-runner
-    # Only run on failure or success, NOT on manual cancellation
-    if: always() && needs.matrix-runner.result != 'cancelled' && github.event.action != 'cancelled'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-      
-      - name: Prevent Duplicate Sessions & Re-dispatch Next Session
+      # ========================================================================
+      # 6. SELF-HEALING 24/7 RE-DISPATCHER (NEXT SESSION)
+      # ========================================================================
+      - name: Self-Healing 24/7 Re-dispatcher
+        if: always() && !cancelled()
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_REPOSITORY: ${{ github.repository }}
@@ -849,74 +603,28 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          
-          # Multiple layers of manual cancellation detection
-          echo "🔍 Checking for manual cancellation signals..."
-          
-          # Layer 0: Check for persistent cancellation marker file
           if [ -f ".workflow_cancelled" ]; then
-            echo "🛑 PERSISTENT CANCELLATION MARKER FOUND"
-            echo "The workflow was manually stopped and marked to not restart."
-            echo "To resume 24/7 operation:"
-            echo "  1. Delete the .workflow_cancelled file from the repository"
-            echo "  2. Manually trigger the workflow from Actions tab"
+            echo "🛑 Cancellation marker found. Skipping auto-restart."
             exit 0
           fi
           
-          # Layer 1: Check workflow conclusion and status
-          current_run="$(gh api "repos/${GH_REPOSITORY}/actions/runs/${CURRENT_RUN_ID}" || echo '{}')"
-          conclusion="$(echo "$current_run" | jq -r '.conclusion // "none"')"
-          status="$(echo "$current_run" | jq -r '.status // "none"')"
-          
-          echo "Workflow Status: $status"
-          echo "Workflow Conclusion: $conclusion"
-          
-          if [ "$conclusion" = "cancelled" ] || [ "$status" = "cancelled" ]; then
-            echo "🛑 MANUAL CANCELLATION DETECTED (workflow level)"
-            echo "Creating persistent cancellation marker..."
-            echo "cancelled_at=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" > .workflow_cancelled
-            echo "cancelled_by=manual" >> .workflow_cancelled
-            echo "run_id=${CURRENT_RUN_ID}" >> .workflow_cancelled
-            
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .workflow_cancelled
-            git commit -m "chore: workflow manually cancelled, disable auto-restart [skip ci]" || true
-            git pull --rebase origin $BRANCH || true
-            git push origin $BRANCH || true
-            
-            echo "Automatic restart is now disabled. To restart, delete .workflow_cancelled and use workflow_dispatch."
-            exit 0
-          fi
-          
-          # Layer 2: Check individual job results
-          jobs_json="$(gh api "repos/${GH_REPOSITORY}/actions/runs/${CURRENT_RUN_ID}/jobs" || echo '{"jobs":[]}')"
-          cancelled_jobs="$(echo "$jobs_json" | jq '[.jobs[] | select(.conclusion == "cancelled")] | length')"
-          
-          if [ "$cancelled_jobs" -gt 0 ]; then
-            echo "🛑 MANUAL CANCELLATION DETECTED ($cancelled_jobs job(s) cancelled)"
-            echo "Automatic restart is disabled. To restart, use workflow_dispatch from Actions tab."
-            exit 0
-          fi
-          
-          # Layer 3: Check if triggered by workflow_dispatch (manual trigger should continue)
-          trigger_event="${{ github.event_name }}"
-          if [ "$trigger_event" = "workflow_dispatch" ]; then
-            echo "ℹ️  Workflow was manually triggered - treating failures as temporary"
-          fi
-          
-          echo "✅ No manual cancellation detected. Proceeding with recovery logic..."
-          
-          # Check for duplicate active sessions
-          runs="$(gh api "repos/${GH_REPOSITORY}/actions/workflows/main.yml/runs?per_page=30" || echo '{"workflow_runs":[]}')"
+          echo "Checking for active runs before scheduling next session..."
+          runs="$(gh api "repos/${GH_REPOSITORY}/actions/workflows/main.yml/runs?per_page=10" || echo '{"workflow_runs":[]}')"
           active="$(jq --arg current "${CURRENT_RUN_ID}" '[.workflow_runs[] | select((.id | tostring) != $current) | select(.status == "queued" or .status == "in_progress" or .status == "pending")] | length' <<< "$runs")"
           
           if [ "$active" -gt 0 ]; then
-            echo "⏭️  Another matrix session is already running. Skipping duplicate dispatch."
+            echo "⏭️ Another session is already queued/running. Skipping duplicate dispatch."
           else
-            echo "🔄 Dispatching next 24/7 production matrix session on branch: $BRANCH..."
+            echo "🚀 Dispatching next 24/7 session on branch: $BRANCH..."
             gh api --method POST \
               "repos/${GH_REPOSITORY}/actions/workflows/main.yml/dispatches" \
               -f ref="$BRANCH"
-            echo "✅ Next matrix session dispatched successfully!"
+            echo "✅ Next 24/7 session dispatched successfully!"
           fi
+
+      - name: Cleanup Background Processes
+        if: always()
+        run: |
+          echo "Terminating any background services..."
+          kill -9 $LAVALINK_PID 2>/dev/null || true
+          kill -9 $TUNNEL_PID 2>/dev/null || true
