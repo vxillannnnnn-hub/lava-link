@@ -98,7 +98,7 @@ async function handleSearchAutocomplete(interaction, client) {
           const duration = formatDuration(t.info.duration);
 
           const choiceName = truncate(`${cleanTitle} — ${cleanAuthor} [${duration}]`, 100);
-          const choiceValue = truncate(t.info.uri || t.info.title, 100);
+          const choiceValue = truncate(`${cleanTitle} ${cleanAuthor}`.trim() || t.info.title, 100);
 
           choices.push({
             name: choiceName,

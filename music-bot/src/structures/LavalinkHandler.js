@@ -419,36 +419,52 @@ function initLavalink(client) {
 
     // Automatic Resilient Fallback Mirror:
     // If a YouTube stream fails due to YouTube bot detection or login requirements,
-    // seamlessly resolve and play a mirror from SoundCloud instead of failing or cutting audio.
+    // seamlessly resolve and play a mirror from SoundCloud or JioSaavn instead of failing or cutting audio.
     const isYouTube = track.info?.sourceName === "youtube" || track.info?.sourceName === "youtubemusic";
     const alreadyRetried = Boolean(player.get(`fallback_${track.info?.identifier}`));
-    const isBotDetection = String(reason).includes("All clients failed") || String(reason).includes("requires login") || String(reason).includes("confirm you’re not a bot");
+    const isPlaybackBlocked =
+      String(reason).includes("All clients failed") ||
+      String(reason).includes("requires login") ||
+      String(reason).includes("confirm you’re not a bot") ||
+      String(reason).includes("unavailable");
 
-    if (isYouTube && !alreadyRetried && isBotDetection && track.info?.title) {
+    if (isYouTube && !alreadyRetried && (isPlaybackBlocked || isYouTube) && track.info?.title) {
       player.set(`fallback_${track.info?.identifier}`, true);
       const cleanTitle = cleanTrackTitle(track.info.title);
       const searchQuery = `scsearch:${cleanTitle} ${track.info.author || ""}`.trim();
       logger.info(`[AudioFallback] YouTube stream blocked. Resolving mirror on SoundCloud: "${searchQuery}"`);
 
       try {
-        const fallbackRes = await player.search({ query: searchQuery }, client.user);
+        let fallbackRes = await player.search({ query: searchQuery }, client.user);
+        if (!fallbackRes?.tracks?.length) {
+          logger.info(`[AudioFallback] Retrying SoundCloud with title only: "scsearch:${cleanTitle}"`);
+          fallbackRes = await player.search({ query: `scsearch:${cleanTitle}` }, client.user);
+        }
+        if (!fallbackRes?.tracks?.length) {
+          logger.info(`[AudioFallback] Retrying with JioSaavn mirror: "jssearch:${cleanTitle}"`);
+          fallbackRes = await player.search({ query: `jssearch:${cleanTitle}` }, client.user);
+        }
+
         if (fallbackRes?.tracks?.length > 0) {
           const mirrorTrack = fallbackRes.tracks[0];
-          logger.success(`[AudioFallback] Found mirror on SoundCloud: "${mirrorTrack.info.title}" (${mirrorTrack.info.uri}). Playing mirror...`);
+          logger.success(`[AudioFallback] Found mirror on ${mirrorTrack.info.sourceName || "SoundCloud"}: "${mirrorTrack.info.title}" (${mirrorTrack.info.uri}). Playing mirror...`);
           if (player.textChannelId) {
             const channel = client.channels.cache.get(player.textChannelId);
             if (channel) {
               channel.send({
-                content: `${emojis.sparkles} Switched to **SoundCloud mirror** for **${truncate(track.info.title, 45)}** (YouTube stream was blocked).`,
+                content: `${emojis.sparkles} Switched to **mirror stream** (${mirrorTrack.info.sourceName || "SoundCloud"}) for **${truncate(track.info.title, 45)}** (direct YouTube stream was blocked).`,
                 allowedMentions: { parse: [], users: [] },
               }).then((m) => setTimeout(() => m.delete().catch(() => {}), 10000)).catch(() => {});
             }
           }
-          await player.play({ track: mirrorTrack });
+          player.queue.current = mirrorTrack;
+          await player.play({ clientTrack: mirrorTrack });
           return;
+        } else {
+          logger.warn(`[AudioFallback] No fallback mirrors found for "${cleanTitle}". Skipping to next...`);
         }
       } catch (fallbackErr) {
-        logger.warn(`[AudioFallback] SoundCloud mirror search failed: ${fallbackErr?.message || fallbackErr}`);
+        logger.warn(`[AudioFallback] Mirror search failed: ${fallbackErr?.message || fallbackErr}`);
       }
     }
 

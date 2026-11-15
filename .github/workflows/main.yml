@@ -57,7 +57,21 @@ jobs:
       # ========================================================================
       # 2. LAVALINK BUILD & CONFIGURATION
       # ========================================================================
+      - name: Restore Lavalink.jar Cache
+        id: jar-cache
+        uses: actions/cache@v5
+        with:
+          path: Lavalink.jar
+          key: lavalink-jar-${{ runner.os }}-${{ vars.LAVALINK_KOE_REF || 'f7335760359f2386cab23eefe66284177f969ff5' }}
+
+      - name: Set Cached Lavalink Env
+        if: steps.jar-cache.outputs.cache-hit == 'true'
+        run: |
+          echo "KOE_LABEL=koe 3.1.0 (cached build, DAVE send-path fix)" >> "$GITHUB_ENV"
+          ls -lh Lavalink.jar
+
       - name: Restore Gradle Cache (Lavalink koe build)
+        if: steps.jar-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -66,6 +80,7 @@ jobs:
           key: lavalink-koe-gradle-${{ runner.os }}-${{ vars.LAVALINK_KOE_REF || 'f7335760359f2386cab23eefe66284177f969ff5' }}
 
       - name: Build Lavalink with koe 3.1.0 (DAVE send-path fix)
+        if: steps.jar-cache.outputs.cache-hit != 'true'
         id: koe-build
         continue-on-error: true
         timeout-minutes: 25
@@ -105,7 +120,7 @@ jobs:
           echo "KOE_LABEL=koe 3.1.0 (self-built, DAVE send-path fix)" >> "$GITHUB_ENV"
 
       - name: Download Upstream Lavalink Node Build (fallback)
-        if: steps.koe-build.outputs.built != 'true'
+        if: steps.jar-cache.outputs.cache-hit != 'true' && steps.koe-build.outputs.built != 'true'
         id: lavalink-image
         env:
           LAVALINK_IMAGE: ${{ vars.LAVALINK_IMAGE || 'ghcr.io/lavalink-devs/lavalink:dev' }}
@@ -496,6 +511,7 @@ jobs:
           LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
           LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
+          DEFAULT_SEARCH_PLATFORM: "scsearch"
           RUNNER_LIFETIME_MS: "19800000"
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}

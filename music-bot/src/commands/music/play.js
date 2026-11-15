@@ -115,7 +115,7 @@ module.exports = {
         !isUrl &&
         (!forcedSource || forcedIsMetadata)
       ) {
-        resolved = await player.search({ query: `ytsearch:${query}` }, interaction.user);
+        resolved = await player.search({ query: `scsearch:${query}` }, interaction.user);
       }
 
       return resolved;

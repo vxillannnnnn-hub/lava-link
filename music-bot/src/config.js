@@ -34,9 +34,8 @@ module.exports = {
     defaultAutoplay: process.env.DEFAULT_AUTOPLAY === "true" || false, // Starts off by default, turns on with button or command
     applyVolumeAsFilter: false, // NEVER decode to PCM if volume is 100
     autoMaximizeBitrate: process.env.AUTO_MAXIMIZE_BITRATE !== "false", // Automatically maximizes voice channel to 384kbps if permitted
-    // YouTube Music serves Opus natively, so Lavaplayer forwards packets without
-    // decoding/re-encoding. That is the highest fidelity path Discord can accept.
-    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "ytmsearch", // ytmsearch, ytsearch, scsearch, spsearch, jssearch
+    // Default to SoundCloud search (scsearch) for ultra-reliable instant streaming on datacenter IPs (zero bot checks)
+    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "scsearch", // scsearch, spsearch, jssearch, ytmsearch, ytsearch
     maxPreviousTracks: 25,
     // Hard cap on upcoming tracks per guild (abuse/memory guard).
     maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "500", 10),

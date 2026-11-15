@@ -167,9 +167,9 @@ plugins:
             flowerytts: false
             youtube: false
         providers:
-            - "ytmsearch:\"%ISRC%\""
             - "scsearch:%QUERY%"
             - "jssearch:%QUERY%"
+            - "ytmsearch:\"%ISRC%\""
             - "ytmsearch:%QUERY%"
             - "ytsearch:%QUERY%"
         lyrics-sources:
@@ -200,9 +200,9 @@ plugins:
             youtube: false
             flowerytts: false
         providers:
-            - "ytmsearch:\"{isrc}\""
             - "scsearch:{query}"
             - "jssearch:{query}"
+            - "ytmsearch:\"{isrc}\""
             - "ytmsearch:{query}"
             - "ytsearch:{query}"
         spotify:
