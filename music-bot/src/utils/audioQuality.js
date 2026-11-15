@@ -238,10 +238,8 @@ function isMetadataOnlyPlatform(value) {
  */
 function resolvePlaybackPlatform(configured = config.player.defaultSearchPlatform) {
   const value = String(configured || "").toLowerCase().trim();
-  if (!value) return "scsearch";
-  if (!isMetadataOnlyPlatform(value)) return value;
-  if (quality.allowMetadataOnlySource === true) return value;
-  return "scsearch";
+  if (!value) return "spsearch";
+  return value;
 }
 
 /**
@@ -324,10 +322,10 @@ async function resolveOpusMatch(player, reference, requester) {
   if (!title) return null;
 
   const queries = [
-    `scsearch:${title} ${author}`.trim(),
     `jssearch:${title} ${author}`.trim(),
+    `jssearch:${title}`.trim(),
     `ytmsearch:${title} ${author}`.trim(),
-    `ytsearch:${title} ${author} audio`.trim()
+    `scsearch:${title} ${author}`.trim(),
   ];
 
   for (const query of queries) {

@@ -511,7 +511,7 @@ jobs:
           LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
           LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
-          DEFAULT_SEARCH_PLATFORM: "scsearch"
+          DEFAULT_SEARCH_PLATFORM: "spsearch"
           RUNNER_LIFETIME_MS: "19800000"
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}

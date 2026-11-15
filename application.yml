@@ -200,8 +200,8 @@ plugins:
             youtube: false
             flowerytts: false
         providers:
-            - "scsearch:{query}"
             - "jssearch:{query}"
+            - "scsearch:{query}"
             - "ytmsearch:\"{isrc}\""
             - "ytmsearch:{query}"
             - "ytsearch:{query}"

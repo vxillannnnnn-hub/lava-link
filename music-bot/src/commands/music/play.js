@@ -107,15 +107,18 @@ module.exports = {
 
       let resolved = await player.search({ query: formattedQuery }, interaction.user);
 
-      // A metadata-only forced platform (Spotify / JioSaavn) has no audio of its
-      // own when the node lacks the matching provider, so fall back to YouTube.
-      const forcedIsMetadata = forcedSource ? audioQuality.isMetadataOnlyPlatform(forcedSource) : false;
-      if (
-        (!resolved || !resolved.tracks || resolved.tracks.length === 0) &&
-        !isUrl &&
-        (!forcedSource || forcedIsMetadata)
-      ) {
-        resolved = await player.search({ query: `scsearch:${query}` }, interaction.user);
+      // Cascading multi-engine fallback to guarantee a track is found
+      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
+        resolved = await player.search({ query: spsearch: }, interaction.user);
+      }
+      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
+        resolved = await player.search({ query: jssearch: }, interaction.user);
+      }
+      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
+        resolved = await player.search({ query: ytmsearch: }, interaction.user);
+      }
+      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
+        resolved = await player.search({ query: ytsearch: }, interaction.user);
       }
 
       return resolved;
