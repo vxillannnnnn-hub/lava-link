@@ -17,6 +17,7 @@ const frameMonitor = require("../utils/frameMonitor");
 const stateManager = require("../utils/stateManager");
 const listenerGuard = require("../utils/listenerGuard");
 const { reconnect247 } = require("../utils/reconnect247");
+const { cleanTrackTitle } = require("../utils/sourceManager");
 
 // =============================================================================
 // Resilient Monkey-Patching for LavalinkNode & Player (Self-Healing Audio Engine)
@@ -415,6 +416,42 @@ function initLavalink(client) {
       `| uri=${track.info?.uri || "-"}`,
     );
     if (ex?.causeStackTrace) logger.error(`[TrackError] causeStackTrace: ${ex.causeStackTrace}`);
+
+    // Automatic Resilient Fallback Mirror:
+    // If a YouTube stream fails due to YouTube bot detection or login requirements,
+    // seamlessly resolve and play a mirror from SoundCloud instead of failing or cutting audio.
+    const isYouTube = track.info?.sourceName === "youtube" || track.info?.sourceName === "youtubemusic";
+    const alreadyRetried = Boolean(player.get(`fallback_${track.info?.identifier}`));
+    const isBotDetection = String(reason).includes("All clients failed") || String(reason).includes("requires login") || String(reason).includes("confirm you’re not a bot");
+
+    if (isYouTube && !alreadyRetried && isBotDetection && track.info?.title) {
+      player.set(`fallback_${track.info?.identifier}`, true);
+      const cleanTitle = cleanTrackTitle(track.info.title);
+      const searchQuery = `scsearch:${cleanTitle} ${track.info.author || ""}`.trim();
+      logger.info(`[AudioFallback] YouTube stream blocked. Resolving mirror on SoundCloud: "${searchQuery}"`);
+
+      try {
+        const fallbackRes = await player.search({ query: searchQuery }, client.user);
+        if (fallbackRes?.tracks?.length > 0) {
+          const mirrorTrack = fallbackRes.tracks[0];
+          logger.success(`[AudioFallback] Found mirror on SoundCloud: "${mirrorTrack.info.title}" (${mirrorTrack.info.uri}). Playing mirror...`);
+          if (player.textChannelId) {
+            const channel = client.channels.cache.get(player.textChannelId);
+            if (channel) {
+              channel.send({
+                content: `${emojis.sparkles} Switched to **SoundCloud mirror** for **${truncate(track.info.title, 45)}** (YouTube stream was blocked).`,
+                allowedMentions: { parse: [], users: [] },
+              }).then((m) => setTimeout(() => m.delete().catch(() => {}), 10000)).catch(() => {});
+            }
+          }
+          await player.play({ track: mirrorTrack });
+          return;
+        }
+      } catch (fallbackErr) {
+        logger.warn(`[AudioFallback] SoundCloud mirror search failed: ${fallbackErr?.message || fallbackErr}`);
+      }
+    }
+
     if (player.textChannelId) {
       const channel = client.channels.cache.get(player.textChannelId);
       if (channel) {

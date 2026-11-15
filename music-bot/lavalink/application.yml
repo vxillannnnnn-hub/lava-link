@@ -1,296 +1,260 @@
-###############################################################################
-# Pulse - Lavalink v4 node configuration (local / VPS, Maven plugins)
+# ==============================================================================
+# Lavalink v4 node configuration - CANONICAL (this is the file that runs)
+# ==============================================================================
+# Read by docker-compose.yml (mounted at /opt/Lavalink/application.yml) and by
+# .github/workflows/main.yml, which only falls back to application.example.yml
+# when this file is missing.
 #
-# This is the local counterpart of the deployed config: `application.yml` at the
-# repository root, which docker-compose.yml mounts and .github/workflows/main.yml
-# runs. Every audio setting below is identical to that file on purpose - a node
-# you test locally has to behave like the node that serves users. Change a
-# buffer, encoder, resampler, threshold, source or filter here and change it in
-# the root file too (application.example.yml mirrors the root file).
+# music-bot/lavalink/application.yml is the local-node copy and repeats every
+# audio setting in this file. Change a buffer, encoder, resampler, threshold,
+# source or filter here and change it there too, or a node tested locally will
+# not behave like the node that serves users.
 #
-# Intentional differences from the deployed config:
-#   plugins      pulled from Maven here; the deployed node loads pre-built JARs
-#                from ./plugins via pluginsDir
-#   solaceaudio  absent here - Spotify/JioSaavn resolve through lavasrc below;
-#                the deployed node enables the SolaceAudio plugin
-#   metrics      off here; the deployed node exposes /metrics for scraping
-#   koe.useEpoll false so the node also starts on a Windows/macOS dev box; the
-#                deployed node is Linux and sets it true
-#   port         4998 in both, so the bot's default LAVALINK_PORT reaches it
-#
-# RUN A BUILD WITH THE KOE/LIBDAVE FIX (Lavalink PR #1235)
-#   Lavalink 4.2.2 (and current `dev`) still ship koe 3.0.0, which has an audio
-#   send-path regression with DAVE (Discord's mandatory end-to-end voice
-#   encryption): the outgoing voice stream stalls 100-400ms roughly once per
-#   second, which listeners hear as constant crackling / micro-dropouts even
-#   though ping is low.
-#   See https://github.com/lavalink-devs/Lavalink/issues/1222
-#   koe 3.1.0 is published and contains the fixes (KyokoBot/koe 3.0.0..3.1.0):
-#   "fix a couple of reentrancy/race bugs", "Fix audio cutoff during key
-#   ratchet negotiation", and "udpqueue: Fix packets being sent to the old IP
-#   address after a server change".
-#   It is NOT in any published Lavalink build: `dev` still pins koe 3.0.0 and
-#   PR #1235 (branch koe-perf) is unmerged, so ghcr.io/lavalink-devs/lavalink:dev
-#   still crackles. .github/workflows/main.yml therefore builds koe-perf itself
-#   and falls back to the image only if that build fails; the bot logs the build
-#   identity at startup.
-#
-# JVM (the flags matter as much as the yml):
-#   java -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -Xms1G -Xmx1G \
-#        -XX:+AlwaysPreTouch -jar Lavalink.jar
-#   On Java 23+ ZGC is generational by default (drop -XX:+ZGenerational - it was
-#   removed in JDK 24). Java 25 + koe 3.1.0 also wants the native-access flags:
-#   java --enable-native-access=ALL-UNNAMED \
-#        --sun-misc-unsafe-memory-access=allow \
-#        -XX:+UseZGC -Xms1G -Xmx2G -jar Lavalink.jar
-#   - Never run Lavalink on a CPU-limited/throttled shared runner; frame drops
-#     come from CPU starvation and GC pauses, not from the bot process.
-#   - Put the node in the same region as the voice channels it serves, on a
-#     wired datacenter link. The audio path is Node -> Discord voice server
-#     (UDP) and never passes through the bot; home internet, WiFi or a tunnel
-#     in front of the node shows up as jitter/stutter that no buffer fully fixes.
-#
-# WHY OPUS PASSTHROUGH IS THE WHOLE GAME
-#   Lavalink forwards the source's Opus packets to Discord untouched when the
-#   track already is Opus (YouTube/YouTube Music, SoundCloud) AND volume is
-#   exactly 100 AND no filter is active. Any digital gain or DSP forces
-#   decode -> resample -> encode, which is a second lossy generation and is
-#   capped by the channel bitrate. opusEncodingQuality/resamplingQuality below
-#   only apply to those transcoded paths - they can never improve a passthrough
-#   track, which is already bit-exact.
-###############################################################################
+# - Multi-source support: YouTube, Spotify, Deezer, JioSaavn, SoundCloud, etc.
+# - Spotify uses internal GraphQL (NO Spotify Developer App or Premium required!)
+# ==============================================================================
 
-server: # REST and WS server
-  port: 4998
-  address: 0.0.0.0
-  http2:
-    enabled: false
-  undertow:
-    buffer-size: 16384
-    direct-buffers: true
-    io-threads: 4
-    no-request-timeout: 60000
-    worker-threads: 64
-    options:
-      socket:
-        TCP_NODELAY: true
-        BACKLOG: 2048
-        REUSE_ADDRESSES: true
-      server:
-        ALWAYS_SET_KEEP_ALIVE: true
-        RECORD_REQUEST_START_TIME: false
+server:
+    address: 0.0.0.0
+    port: 4998 # Set your desired server port
+    http2:
+        enabled: false
+    undertow:
+        buffer-size: 16384
+        direct-buffers: true
+        io-threads: 4
+        no-request-timeout: 60000
+        worker-threads: 64
+        options:
+            socket:
+                TCP_NODELAY: true
+                BACKLOG: 2048
+                REUSE_ADDRESSES: true
+            server:
+                ALWAYS_SET_KEEP_ALIVE: true
+                RECORD_REQUEST_START_TIME: false
 
-# koe 3.x reads this top-level block. Lavalink 4.2.x (koe 3.0.0) reads the copy
-# under lavalink.server.koe below, so both are set and either build works.
 koe:
-  useEpoll: false # true on the Linux deployment
-  useKQueue: false
-  highPacketPriority: true
-  bufferDurationMs: 1000
-  byteBufAllocator: "pooled"
+    useEpoll: true # Linux native C-epoll network transport (lowest UDP voice latency)
+    useKQueue: false
+    highPacketPriority: true # Real-time scheduling priority for Discord voice frames
+    bufferDurationMs: 1000 # Native audio queue: a full second absorbs GC/scheduler/network spikes (adds ~0.6s latency, removes underrun crackle)
+    byteBufAllocator: "pooled" # Netty pooled off-heap direct buffers
 
 lavalink:
-  plugins:
-    # Required for YouTube in Lavalink v4 (the built-in source is deprecated and
-    # no longer yields playable streams). Provides Opus-native audio, so packets
-    # are forwarded without re-encoding.
-    # 1.18.x carries the format/SABR fixes: older builds can stop finding Opus
-    # streams and silently fall back to AAC (which then has to be transcoded).
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-      snapshot: false
-    # Spotify / Apple Music / Deezer / Tidal metadata + full-length audio mirror.
-    # WITHOUT spotify credentials `spsearch:` only returns 30 second previews.
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
-      repository: "https://maven.lavalink.dev/releases"
-      snapshot: false
-    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
-      repository: "https://maven.lavalink.dev/releases"
-      snapshot: false
-
-  server:
-    password: "${LAVALINK_PASSWORD:youshallnotpass}"
-
-    # --- Audio quality / latency knobs ---------------------------------------
-    # These are the deployed values. The reasoning is the same everywhere: every
-    # knob that buys resilience against GC/scheduler/network spikes is worth its
-    # latency, and every knob that costs CPU is suspect because CPU starvation
-    # is what actually drops 20ms frames.
-    # JDA-NAS queue. 400ms is Lavalink's default; 1000ms rides out the longer GC
-    # pauses that show up as periodic gaps on a shared node, at the cost of
-    # ~0.6s extra time-to-first-audio. Drop to ~250 only after measuring.
-    # It cannot mask the DAVE send-path stall (lavalink-devs/Lavalink#1222):
-    # under DAVE, frames are encrypted on the JVM thread instead of being drained
-    # from this buffer, so buffer size is not what fixes that crackle.
-    bufferDurationMs: 1000
-    # Documented default. `true` reduces per-frame allocations but makes frame
-    # rebuilding non-instantaneous (Lavalink docs), so a live `/volume` or
-    # `/filter` change lands late - the wrong trade for a bot whose commands
-    # change both mid-stream.
-    nonAllocatingFrameBuffer: false
-    # How much decoded audio is kept buffered. 5000ms = resilient to jitter.
-    frameBufferDurationMs: 5000
-    # Opus encoder quality, 0-10. Only used when the source is NOT already Opus
-    # (mirrors, MP3/AAC streams, livestreams, or any track with volume != 100).
-    # 10 = best fidelity; zero effect on passthrough tracks.
-    opusEncodingQuality: 10
-    # Resampling quality, LOW/MEDIUM/HIGH. Transcode-only. HIGH costs several
-    # times the CPU per resampled player and only affects resampled material
-    # (44.1kHz MP3/AAC mirrors), so MEDIUM is the better trade on a shared node.
-    resamplingQuality: MEDIUM
-    # How long a track may deliver no audio before it is treated as stuck. 10s
-    # is Lavalink's default; a lower value skips slow-starting tracks and is
-    # heard as the song randomly cutting out.
-    trackStuckThresholdMs: 10000
-    # Seek while the buffered audio keeps playing - no gap when users seek.
-    useSeekGhosting: true
-    # Player position updates per second. 5 is Lavalink's default and plenty for
-    # a progress bar; 1/s per player is needless WS traffic on a busy node.
-    playerUpdateInterval: 5
-    # Pages of a YouTube playlist to load.
-    youtubePlaylistLoadLimit: 6
-    gc-warnings: true
-    koe:
-      useEpoll: false # true on the Linux deployment
-      useKQueue: false
-      highPacketPriority: true
-      bufferDurationMs: 1000
-      byteBufAllocator: "pooled"
-
-    youtubeSearchEnabled: false # handled by dev.lavalink.youtube
-    soundcloudSearchEnabled: true
-
-    sources:
-      youtube: false # handled by the youtube plugin above
-      soundcloud: true # SoundCloud serves Opus too - good quality, no transcode
-      bandcamp: true
-      twitch: true
-      vimeo: true
-      http: true # direct Icecast/Shoutcast/MP3 streams
-      local: false
-
-    filters:
-      volume: true
-      equalizer: true
-      karaoke: true
-      timescale: true
-      tremolo: true
-      vibrato: true
-      distortion: true
-      rotation: true
-      channelMix: true
-      lowPass: true
+    plugins: [] # Loads pre-bundled local JARs from ./plugins
+    pluginsDir: "./plugins"
+    server:
+        password: "YOUR_LAVALINK_PASSWORD" # Change this password
+        bufferDurationMs: 1000 # JDA-NAS queue for GC/scheduler spikes (~0.6s added latency). It cannot mask the DAVE send-path stall (#1222) - that is a koe build issue
+        frameBufferDurationMs: 5000 # Pre-buffered frames: 5.0s prevents stuttering during internet packet loss
+        playerUpdateInterval: 5 # Lavalink's default. 2/s per player doubles WS traffic for nothing
+        opusEncodingQuality: 10 # Transcode-only: best VBR Opus fidelity, no effect on passthrough
+        resamplingQuality: MEDIUM # Transcode-only. HIGH costs several times the CPU per resampled player, and CPU starvation is what drops frames
+        trackStuckThresholdMs: 10000 # 10s. A lower value skips slow-starting tracks and is heard as the song cutting out
+        useSeekGhosting: true # Keep reading buffered audio until the seek target is ready: no silent gap on /seek
+        nonAllocatingFrameBuffer: false # Documented default. `true` cuts allocations but makes frame rebuilding non-instantaneous, so live volume/EQ changes land late
+        gc-warnings: true # Log JVM pause warnings so node-side stutter is diagnosable
+        youtubePlaylistLoadLimit: 6 # Pages of a YouTube playlist to load
+        koe:
+            useEpoll: true
+            useKQueue: false
+            highPacketPriority: true
+            bufferDurationMs: 1000
+            byteBufAllocator: "pooled"
+        youtubeSearchEnabled: false # Handled via dev.lavalink.youtube
+        soundcloudSearchEnabled: true
+        sources:
+            youtube: false # Handled by dev.lavalink.youtube plugin
+            soundcloud: true
+            bandcamp: true
+            twitch: true
+            vimeo: true
+            http: true # (`nico` was a v3-era source and a no-op in v4 - dropped)
+            local: false
+        filters:
+            volume: true
+            equalizer: true
+            karaoke: true
+            timescale: true
+            tremolo: true
+            vibrato: true
+            distortion: true
+            rotation: true
+            channelMix: true
+            lowPass: true
 
 plugins:
-  youtube:
-    enabled: true
-    allowSearch: true
-    allowDirectVideoIds: true
-    allowDirectPlaylistIds: true
-    # Order follows the official youtube-source capability table
-    # (github.com/lavalink-devs/youtube-source -> "Available Clients").
-    # MUSIC is SEARCH ONLY (no Opus formats, no playback support): it resolves
-    # `ytmsearch:` metadata and the audio comes from the clients below.
-    # ANDROID_MUSIC / ANDROID_VR / TVHTML5_SIMPLY / WEBEMBEDDED / TV return
-    # adaptive Opus (itag 251), which is what keeps playback on bit-exact Opus
-    # passthrough instead of transcoding a muxed AAC fallback.
-    clients:
-      - MUSIC
-      - ANDROID_MUSIC
-      - ANDROID_VR
-      - TVHTML5_SIMPLY
-      - WEB
-      - MWEB
-      - WEBEMBEDDED
-      - TV
-    clientOptions:
-      MUSIC:
-        playback: false # youtube-source lists no playback support for MUSIC
-        searching: true
-      # Reliable non-web Opus players (adaptive itag 251, not SABR-gated).
-      ANDROID_MUSIC:
-        playback: true
-        searching: true
-      ANDROID_VR:
-        playback: true
-        searching: true
-      TVHTML5_SIMPLY:
-        playback: true
-        searching: true
-      # WEB is SABR-gated; see the deployed application.yml for the rationale.
-      WEB:
-        playback: false
-        searching: true
-      MWEB:
-        playback: false
-        searching: true
-      WEBEMBEDDED:
-        playback: true
-        searching: true
-      TV:
-        playback: true
-        videoLoading: false
-        searching: false
-        playlistLoading: false
-    # OAuth on the TV client is what keeps playback stable and full quality from
-    # datacenter IPs. An empty refreshToken means OAuth is skipped, exactly as in
-    # the deployed file before the workflow injects YOUTUBE_REFRESH_TOKEN.
-    oauth:
-      enabled: true
-      skipInitialization: false
-      refreshToken: ""
-    remoteCipher:
-      url: "https://cipher.kikkia.dev"
-      userAgent: "yt-source"
+    # --------------------------------------------------------------------------
+    # YouTube Plugin (dev.lavalink.youtube)
+    # --------------------------------------------------------------------------
+    youtube:
+        enabled: true
+        allowSearch: true
+        allowDirectVideoIds: true
+        allowDirectPlaylistIds: true
+        # Order follows the official youtube-source capability table
+        # (github.com/lavalink-devs/youtube-source -> "Available Clients").
+        #
+        # MUSIC is SEARCH ONLY: the table lists no Opus formats and no playback
+        # support for it. `ytmsearch:` therefore resolves metadata here and the
+        # audio stream comes from the clients below. The clients that return
+        # Opus without needing SABR are ANDROID_MUSIC, ANDROID_VR,
+        # TVHTML5_SIMPLY, WEBEMBEDDED and TV - they are what keeps the node on
+        # bit-exact Opus passthrough instead of transcoding an AAC fallback.
+        clients:
+            - MUSIC # `ytmsearch:` support - search only, cannot play
+            - ANDROID_MUSIC # Opus playback + full metadata
+            - ANDROID_VR # Opus playback, bot-detection fallback
+            - IOS # Mobile iOS client - bypasses bot-detection on datacenter IPs
+            - ANDROID # Mobile Android client
+            - TVHTML5_SIMPLY # Opus playback fallback
+            - WEB # Web client with local cipher
+            - MWEB # Mobile web client
+            - WEBEMBEDDED # Opus playback for age-restricted / embed-only tracks
+            - TV # Opus + OAuth playback (refreshToken); metadata: none
+        clientOptions:
+            MUSIC:
+                playback: false # youtube-source lists no playback support for MUSIC
+                searching: true
+            ANDROID_MUSIC:
+                playback: true
+                searching: true
+            ANDROID_VR:
+                playback: true
+                searching: true
+            IOS:
+                playback: true
+                searching: true
+            ANDROID:
+                playback: true
+                searching: true
+            TVHTML5_SIMPLY:
+                playback: true
+                searching: true
+            WEB:
+                playback: true
+                searching: true
+            MWEB:
+                playback: true
+                searching: true
+            WEBEMBEDDED:
+                playback: true
+                searching: true
+            TV:
+                playback: true
+                videoLoading: false
+                searching: false
+                playlistLoading: false
+        oauth:
+            enabled: false
+            skipInitialization: true
+            refreshToken: ""
+        # remoteCipher disabled: local GraalJS/Nashorn cipher manager handles signatures locally without 404 network failure
+        # remoteCipher:
+        #     url: "https://cipher.kikkia.dev"
+        #     userAgent: "yt-source"
 
-  lavasrc:
-    sources:
-      spotify: false # enable + set credentials below for full-length Spotify audio
-      applemusic: false
-      deezer: false
-      yandexmusic: false
-      flowerytts: false
-      youtube: false # the youtube plugin owns `youtube:`/`ytmsearch:`
-    # Last fallback is `scsearch:` here because the deployed config's `jssearch:`
-    # comes from the SolaceAudio plugin, which this file does not load.
-    providers:
-      - "ytmsearch:\"%ISRC%\""
-      - "ytmsearch:%QUERY%"
-      - "ytsearch:%QUERY%"
-      - "scsearch:%QUERY%"
-    lyrics-sources:
-      spotify: true
-      youtube: true
-      deezer: false
-    # Full-length Spotify audio (never previews) requires these. Without them
-    # Spotify resolves to 30 second previews, which is the "bot plays 30 seconds
-    # and stops" symptom.
-    # spotify:
-    #   clientId: "YOUR_SPOTIFY_CLIENT_ID"
-    #   clientSecret: "YOUR_SPOTIFY_CLIENT_SECRET"
-    #   countryCode: "IN"
-    #   playlistLoadLimit: 50
-    #   albumLoadLimit: 50
+    # --------------------------------------------------------------------------
+    # LavaSrc Plugin (Spotify / Deezer)
+    # --------------------------------------------------------------------------
+    lavasrc:
+        sources:
+            spotify: false # Handled by SolaceAudio
+            applemusic: false
+            deezer: false
+            yandexmusic: false
+            flowerytts: false
+            youtube: false
+        providers:
+            - "ytmsearch:\"%ISRC%\""
+            - "scsearch:%QUERY%"
+            - "jssearch:%QUERY%"
+            - "ytmsearch:%QUERY%"
+            - "ytsearch:%QUERY%"
+        lyrics-sources:
+            spotify: true
+            youtube: true
+            deezer: false
+        spotify:
+            clientId: "YOUR_SPOTIFY_CLIENT_ID"
+            clientSecret: "YOUR_SPOTIFY_CLIENT_SECRET"
+            spDc: "YOUR_SPOTIFY_SP_DC_COOKIE"
+            countryCode: "IN"
+            playlistLoadLimit: 50
+            albumLoadLimit: 50
+            resolveArtistsInSearch: true
+            localFiles: false
 
-  lavasearch:
-    sources:
-      youtube: true
-      spotify: true
-      deezer: false
-      soundcloud: true
+    # --------------------------------------------------------------------------
+    # SolaceAudio Plugin (Spotify & Indian Streaming - FULL LENGTH AUDIO)
+    # --------------------------------------------------------------------------
+    solaceaudio:
+        sources:
+            spotify: true # Enabled! Bypasses Spotify Developer / Premium restrictions
+            jiosaavn: true
+            gaana: false
+            amazonmusic: false
+            deezer: false # Disabled: Deezer preview is strictly 30s clips without premium keys
+            pandora: false
+            youtube: false
+            flowerytts: false
+        providers:
+            - "ytmsearch:\"{isrc}\""
+            - "scsearch:{query}"
+            - "jssearch:{query}"
+            - "ytmsearch:{query}"
+            - "ytsearch:{query}"
+        spotify:
+            countryCode: "IN"
+            playlistLoadLimit: 50
+            albumLoadLimit: 50
+            resolveArtistsInSearch: true
+            localFiles: false
+            spDc: "YOUR_SPOTIFY_SP_DC_COOKIE"
+        deezer:
+            apiUrl: "https://deezer-plugin-api.vercel.app/api"
+            playlistLoadLimit: 50
+            albumLoadLimit: 50
+            artistLoadLimit: 50
+            searchLimit: 50
+
+    # --------------------------------------------------------------------------
+    # LavaSearch Plugin (com.github.topi314.lavasearch)
+    # --------------------------------------------------------------------------
+    lavasearch:
+        sources:
+            youtube: true
+            spotify: true
+            deezer: false
+            soundcloud: true
 
 logging:
-  file:
-    path: ./logs/
-  level:
-    lavalink: INFO
-    moe.kyokobot.koe: INFO
-    root: INFO
+    file:
+        path: ./logs/
+    level:
+        com.solaceaudio: INFO
+        lavalink: INFO
+        moe.kyokobot.koe: INFO
+        dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
+        root: INFO
+    logback:
+        rollingPolicy:
+            maxFileSize: 1GB
+            maxHistory: 30
+    request:
+        enabled: true
+        includeClientInfo: true
+        includeHeaders: false
+        includePayload: true
+        includeQueryString: true
+        maxPayloadLength: 10000
 
 metrics:
-  prometheus:
-    enabled: false # the deployed node enables this for scraping
-    endpoint: /metrics
+    prometheus:
+        enabled: true
+        endpoint: /metrics
 
 sentry:
-  dsn: ""
-  environment: ""
+    dsn: ""
+    environment: ""

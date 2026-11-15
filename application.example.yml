@@ -106,65 +106,54 @@ plugins:
             - MUSIC # `ytmsearch:` support - search only, cannot play
             - ANDROID_MUSIC # Opus playback + full metadata
             - ANDROID_VR # Opus playback, bot-detection fallback
+            - IOS # Mobile iOS client - bypasses bot-detection on datacenter IPs
+            - ANDROID # Mobile Android client
             - TVHTML5_SIMPLY # Opus playback fallback
-            - WEB # Opus formats, playback SABR-gated on this build
-            - MWEB # Opus formats, playback SABR-gated on this build
+            - WEB # Web client with local cipher
+            - MWEB # Mobile web client
             - WEBEMBEDDED # Opus playback for age-restricted / embed-only tracks
             - TV # Opus + OAuth playback (refreshToken); metadata: none
         clientOptions:
             MUSIC:
                 playback: false # youtube-source lists no playback support for MUSIC
                 searching: true
-            # These three are the reliable non-web Opus players: they return the
-            # adaptive Opus stream (itag 251) instead of the SABR-gated web
-            # formats. With them disabled for playback the only players left
-            # were the SABR-gated web clients, whose muxed itag-18 fallback is
-            # AAC and has to be re-encoded - the exact quality loss this config
-            # exists to prevent. A client that gets flagged on a datacenter IP
-            # simply returns "requires login" and youtube-source tries the next
-            # one, so enabling them cannot make playback worse.
             ANDROID_MUSIC:
                 playback: true
                 searching: true
             ANDROID_VR:
                 playback: true
                 searching: true
+            IOS:
+                playback: true
+                searching: true
+            ANDROID:
+                playback: true
+                searching: true
             TVHTML5_SIMPLY:
                 playback: true
                 searching: true
-            # WEB is SABR-gated: when YouTube answers its /player request with only
-            # SABR-gated adaptive formats, the plugin falls back to muxed itag 18,
-            # which lacks contentLength and fails to decode ("Expected decoding
-            # to halt, got: 5" / Audio decode failure at 0 ms). Keep WEB for search
-            # metadata only and let the non-SABR clients carry playback.
             WEB:
-                playback: false
+                playback: true
                 searching: true
-            # MWEB is SABR-gated as well. WEBEMBEDDED stays enabled because it is
-            # the only client that can serve age-restricted / embed-only tracks.
-            # It sits after the Opus players above, so it is a last resort and
-            # the SABR itag-18 fallback is not the common path.
             MWEB:
-                playback: false
+                playback: true
                 searching: true
             WEBEMBEDDED:
                 playback: true
                 searching: true
-            # TV is the OAuth-enabled playback client. It cannot load metadata
-            # (Metadata Support: None), so it is restricted to playback only and
-            # relies on the clients above to load the track first.
             TV:
                 playback: true
                 videoLoading: false
                 searching: false
                 playlistLoading: false
         oauth:
-            enabled: true
-            skipInitialization: false
+            enabled: false
+            skipInitialization: true
             refreshToken: ""
-        remoteCipher:
-            url: "https://cipher.kikkia.dev"
-            userAgent: "yt-source"
+        # remoteCipher disabled: local GraalJS/Nashorn cipher manager handles signatures locally without 404 network failure
+        # remoteCipher:
+        #     url: "https://cipher.kikkia.dev"
+        #     userAgent: "yt-source"
 
     # --------------------------------------------------------------------------
     # LavaSrc Plugin (Spotify / Deezer)
@@ -179,9 +168,10 @@ plugins:
             youtube: false
         providers:
             - "ytmsearch:\"%ISRC%\""
+            - "scsearch:%QUERY%"
+            - "jssearch:%QUERY%"
             - "ytmsearch:%QUERY%"
             - "ytsearch:%QUERY%"
-            - "jssearch:%QUERY%"
         lyrics-sources:
             spotify: true
             youtube: true
@@ -211,9 +201,10 @@ plugins:
             flowerytts: false
         providers:
             - "ytmsearch:\"{isrc}\""
+            - "scsearch:{query}"
+            - "jssearch:{query}"
             - "ytmsearch:{query}"
             - "ytsearch:{query}"
-            - "jssearch:{query}"
         spotify:
             countryCode: "IN"
             playlistLoadLimit: 50
