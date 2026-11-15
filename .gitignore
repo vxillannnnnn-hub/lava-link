@@ -7,6 +7,30 @@ logs/
 # Sensitive local configurations
 application.yml.local
 .env
+*.env
+.workflow_cancelled
+
+# Node / Dependencies
+node_modules/
+package-lock.json
+package.json
+
+# Local scripts & temp files
+.freebuff/
+.tmp-*
+temp-username.txt
+workflow-logs.txt
+*.ps1
+CHECKLIST.txt
+CLOUDFLARE_STATUS.md
+CLOUDFLARE_TUNNEL_SETUP.md
+CONNECTION_ARCHITECTURE.md
+GET_TUNNEL_TOKEN.md
+MIGRATION_README.md
+QUICK_SETUP.md
+SETUP_NEW_REPO.md
+START_HERE.md
+WORKFLOW_FIX_SUMMARY.md
 
 # OS files
 .DS_Store
