@@ -236,9 +236,9 @@ function isMetadataOnlyPlatform(value) {
  * @param {string} [configured] configured platform / search prefix
  * @returns {string} platform to search with
  */
-function resolvePlaybackPlatform(configured = config.player.defaultSearchPlatform) {
+function resolvePlaybackPlatform(configured = config.player?.defaultSearchPlatform) {
   const value = String(configured || "").toLowerCase().trim();
-  if (!value) return "spsearch";
+  if (!value) return "ytmsearch";
   return value;
 }
 
@@ -322,10 +322,10 @@ async function resolveOpusMatch(player, reference, requester) {
   if (!title) return null;
 
   const queries = [
-    `jssearch:${title} ${author}`.trim(),
-    `jssearch:${title}`.trim(),
     `ytmsearch:${title} ${author}`.trim(),
+    `ytsearch:${title} ${author}`.trim(),
     `scsearch:${title} ${author}`.trim(),
+    `jssearch:${title} ${author}`.trim(),
   ];
 
   for (const query of queries) {

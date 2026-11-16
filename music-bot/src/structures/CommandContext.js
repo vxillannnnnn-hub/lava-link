@@ -83,18 +83,41 @@ class CommandContext {
 
         getString: (name) => {
           if (!effectiveArgs || effectiveArgs.length === 0) return null;
-          // A platform token is read as the `source` option, so it must not be
-          // left inside the search query (`.play <song> ytsearch` used to search
-          // for the literal "<song> ytsearch", platform word included).
+          // Platform prefixes & flags supported: yt, -yt, sc, -sc, sp, -sp, ytm, -ytm, js, -js, etc.
+          const SOURCE_FLAG_MAP = {
+            yt: "ytsearch",
+            "-yt": "ytsearch",
+            youtube: "ytsearch",
+            ytsearch: "ytsearch",
+            ytm: "ytmsearch",
+            "-ytm": "ytmsearch",
+            youtubemusic: "ytmsearch",
+            ytmsearch: "ytmsearch",
+            sc: "scsearch",
+            "-sc": "scsearch",
+            soundcloud: "scsearch",
+            scsearch: "scsearch",
+            sp: "spsearch",
+            "-sp": "spsearch",
+            spotify: "spsearch",
+            spsearch: "spsearch",
+            js: "jssearch",
+            "-js": "jssearch",
+            jiosaavn: "jssearch",
+            saavn: "jssearch",
+            jssearch: "jssearch",
+          };
           const sourceToken = effectiveArgs.find((a) =>
-            /^(spsearch|ytsearch|ytmsearch|scsearch|jssearch)$/i.test(a)
+            Object.prototype.hasOwnProperty.call(SOURCE_FLAG_MAP, String(a).toLowerCase())
           );
+          const resolvedSource = sourceToken ? SOURCE_FLAG_MAP[sourceToken.toLowerCase()] : null;
+
           // For song search queries and playlist names, preserve the entire remainder with spaces!
           if (name === "query") {
             return effectiveArgs.filter((a) => a !== sourceToken).join(" ");
           }
           if (name === "name") return effectiveArgs.join(" ");
-          if (name === "source") return sourceToken ? sourceToken.toLowerCase() : null;
+          if (name === "source") return resolvedSource;
           if (name === "time" || name === "new" || name === "action" || name === "mode") return effectiveArgs[0] || null;
           return effectiveArgs.join(" ") || null;
         },

@@ -431,18 +431,22 @@ function initLavalink(client) {
     if (isYouTube && !alreadyRetried && (isPlaybackBlocked || isYouTube) && track.info?.title) {
       player.set(`fallback_${track.info?.identifier}`, true);
       const cleanTitle = cleanTrackTitle(track.info.title);
-      const searchQuery = `jssearch:${cleanTitle} ${track.info.author || ""}`.trim();
-      logger.info(`[AudioFallback] YouTube stream blocked. Resolving mirror on JioSaavn: "${searchQuery}"`);
+      const author = track.info.author || "";
+      logger.info(`[AudioFallback] YouTube stream blocked. Resolving official mirror on SoundCloud: "${cleanTitle} ${author}"`);
 
       try {
-        let fallbackRes = await player.search({ query: searchQuery }, client.user);
+        let fallbackRes = await player.search({ query: `scsearch:${cleanTitle} ${author}`.trim() }, client.user);
         if (!fallbackRes?.tracks?.length) {
-          logger.info(`[AudioFallback] Retrying JioSaavn with title only: "jssearch:${cleanTitle}"`);
-          fallbackRes = await player.search({ query: `jssearch:${cleanTitle}` }, client.user);
+          logger.info(`[AudioFallback] Retrying SoundCloud with title only: "scsearch:${cleanTitle}"`);
+          fallbackRes = await player.search({ query: `scsearch:${cleanTitle}` }, client.user);
         }
         if (!fallbackRes?.tracks?.length) {
-          logger.info(`[AudioFallback] Retrying with SoundCloud mirror: "scsearch:${cleanTitle}"`);
-          fallbackRes = await player.search({ query: `scsearch:${cleanTitle}` }, client.user);
+          logger.info(`[AudioFallback] Retrying with Spotify mirror: "spsearch:${cleanTitle} ${author}"`);
+          fallbackRes = await player.search({ query: `spsearch:${cleanTitle} ${author}`.trim() }, client.user);
+        }
+        if (!fallbackRes?.tracks?.length) {
+          logger.info(`[AudioFallback] Retrying with JioSaavn mirror: "jssearch:${cleanTitle} ${author}"`);
+          fallbackRes = await player.search({ query: `jssearch:${cleanTitle} ${author}`.trim() }, client.user);
         }
 
         if (fallbackRes?.tracks?.length > 0) {

@@ -255,6 +255,8 @@ jobs:
           echo "✅ cloudflared successfully installed!"
 
       - name: Start Lavalink Node (Java 25 + koe 3.1.0)
+        env:
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || '' }}
         run: |
           if [ ! -f "Lavalink.jar" ]; then
             echo "::error::Lavalink.jar not found!"
@@ -475,7 +477,9 @@ jobs:
           LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
           LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
-          DEFAULT_SEARCH_PLATFORM: "spsearch"
+          DEFAULT_SEARCH_PLATFORM: "ytmsearch"
+          STOP_ALONE_IN_247: "false"
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || '' }}
           RUNNER_LIFETIME_MS: "19800000"
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_TOKEN || github.token }}

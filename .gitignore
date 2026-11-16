@@ -20,6 +20,8 @@ package.json
 .tmp-*
 temp-username.txt
 workflow-logs.txt
+run-*.txt
+scripts/scan_log.py
 *.ps1
 CHECKLIST.txt
 CLOUDFLARE_STATUS.md

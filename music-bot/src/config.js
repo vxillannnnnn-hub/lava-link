@@ -34,20 +34,16 @@ module.exports = {
     defaultAutoplay: process.env.DEFAULT_AUTOPLAY === "true" || false, // Starts off by default, turns on with button or command
     applyVolumeAsFilter: false, // NEVER decode to PCM if volume is 100
     autoMaximizeBitrate: process.env.AUTO_MAXIMIZE_BITRATE !== "false", // Automatically maximizes voice channel to 384kbps if permitted
-    // Default to Spotify search (spsearch) with high-bitrate JioSaavn CDN audio stream (ultra-reliable, zero bot blocks)
-    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "spsearch", // spsearch, jssearch, ytmsearch, scsearch
+    // Default to YouTube Music search (ytmsearch) for official original recordings & bit-exact Opus
+    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "ytmsearch", // ytmsearch, ytsearch, scsearch, spsearch, jssearch
     maxPreviousTracks: 25,
     // Hard cap on upcoming tracks per guild (abuse/memory guard).
     maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "500", 10),
     inactivityTimeoutMs: parseInt(process.env.INACTIVITY_TIMEOUT_MS || "180000", 10), // 3 minutes
     emptyChannelTimeoutMs: parseInt(process.env.EMPTY_CHANNEL_TIMEOUT_MS || "120000", 10), // 2 minutes
-    // 24/7 keeps the bot connected, but streaming to an empty room still costs
-    // CPU/bandwidth and looks broken. An empty channel therefore STOPS the
-    // stream (queue and position preserved, playback restarts on the next
-    // join) instead of only pausing, which autoplay could silently undo.
-    // PAUSE_ALONE_IN_247 is the legacy name and still works.
+    // In 24/7 mode, streams continue playing without premature cutoffs. Defaults to false.
     stopStreamingAloneIn247:
-      (process.env.STOP_ALONE_IN_247 ?? process.env.PAUSE_ALONE_IN_247 ?? "true") !== "false",
+      (process.env.STOP_ALONE_IN_247 ?? process.env.PAUSE_ALONE_IN_247 ?? "false") === "true",
     autoReconnect: true,
     gaplessPreload: true, // Pre-resolve next track/autoplay recommendation in background
     minAutoPlayMs: parseInt(process.env.MIN_AUTOPLAY_MS || "5000", 10), // anti-spam guard between autoplay hand-offs

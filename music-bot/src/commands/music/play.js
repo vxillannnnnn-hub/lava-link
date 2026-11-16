@@ -42,7 +42,15 @@ module.exports = {
 
   async execute(interaction, client) {
     const query = interaction.options.getString("query");
+    let existingPlayer = client.lavalink.getPlayer(interaction.guildId);
     if (!query || !query.trim()) {
+      if (existingPlayer?.paused) {
+        await existingPlayer.resume().catch(() => {});
+        const currentTitle = existingPlayer.queue?.current?.info?.title || "audio";
+        return interaction.reply(
+          actionWithButton(emojis.play, `Resumed **${truncate(currentTitle, 40)}**`, "Playback resumed")
+        );
+      }
       return interaction.reply(
         errorText("Provide a song name or a link.", "Example: `/play query:never gonna give you up` or `.play <song>`")
       );
@@ -105,20 +113,22 @@ module.exports = {
         formattedQuery = `${prefix}:${query}`;
       }
 
-      let resolved = await player.search({ query: formattedQuery }, interaction.user);
+      let resolved = await player.search({ query: formattedQuery }, interaction.user).catch(() => null);
 
-      // Cascading multi-engine fallback to guarantee a track is found
+      // Cascading multi-engine fallback (YouTube Music -> YouTube -> SoundCloud -> Spotify -> JioSaavn)
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: `spsearch:${query}` }, interaction.user);
-      }
-      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: `jssearch:${query}` }, interaction.user);
-      }
-      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: `ytmsearch:${query}` }, interaction.user);
-      }
-      if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        resolved = await player.search({ query: `ytsearch:${query}` }, interaction.user);
+        const fallbacks = ["ytmsearch", "ytsearch", "scsearch", "spsearch", "jssearch"];
+        for (const engine of fallbacks) {
+          const candidateQuery = `${engine}:${query}`;
+          if (candidateQuery.toLowerCase() === formattedQuery.toLowerCase()) continue;
+          try {
+            resolved = await player.search({ query: candidateQuery }, interaction.user);
+            if (resolved?.tracks?.length > 0) {
+              logger.info(`[Search] Found track via fallback engine "${engine}" for: "${query}"`);
+              break;
+            }
+          } catch (_) {}
+        }
       }
 
       return resolved;

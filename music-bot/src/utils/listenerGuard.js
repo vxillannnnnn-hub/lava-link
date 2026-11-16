@@ -37,20 +37,34 @@ const watches = new Map();
  * channels and stopped the auto-pause from ever firing.
  */
 function countHumanListeners(client, guild, channelId) {
-  if (!guild || !channelId || !guild.voiceStates?.cache) return 0;
+  if (!guild || !channelId) return 0;
 
   const multiBotCoordinator = require("./multiBotCoordinator");
   const botIds = multiBotCoordinator.allBotIds || [];
   let humans = 0;
 
-  for (const vs of guild.voiceStates.cache.values()) {
-    if (vs.channelId !== channelId || vs.id == null) continue;
-    if (botIds.includes(vs.id)) continue;
-    const isBot =
-      vs.member?.user?.bot ||
-      guild.members?.cache?.get(vs.id)?.user?.bot ||
-      client?.users?.cache?.get?.(vs.id)?.bot;
-    if (!isBot) humans++;
+  // 1. Direct channel member inspection (most authoritative in Discord.js)
+  const channel = guild.channels?.cache?.get?.(channelId);
+  if (channel?.members?.size > 0) {
+    for (const member of channel.members.values()) {
+      if (!member?.user) continue;
+      if (botIds.includes(member.user.id) || member.user.bot) continue;
+      humans++;
+    }
+    if (humans > 0) return humans;
+  }
+
+  // 2. Check guild.voiceStates.cache
+  if (guild.voiceStates?.cache) {
+    for (const vs of guild.voiceStates.cache.values()) {
+      if (vs.channelId !== channelId || vs.id == null) continue;
+      if (botIds.includes(vs.id)) continue;
+      const isBot =
+        vs.member?.user?.bot ||
+        guild.members?.cache?.get(vs.id)?.user?.bot ||
+        client?.users?.cache?.get?.(vs.id)?.bot;
+      if (!isBot) humans++;
+    }
   }
 
   return humans;
@@ -253,10 +267,10 @@ async function enforce(player, client, { notify = false, graceMs } = {}) {
     return { humans, action: cancelled ? "cancelled" : "listening" };
   }
 
-  // Alone. 24/7 keeps the seat but must not broadcast to an empty room.
+  // Alone. 24/7 keeps the seat. If stopStreamingAloneIn247 is explicitly true, suspend streaming.
   if (player.get?.("247")) {
     clearWatch(resolvedClient, player.guildId, channelId);
-    if (config.player.stopStreamingAloneIn247 !== false) {
+    if (config.player?.stopStreamingAloneIn247 === true) {
       const suspended = await suspendStreaming(player);
       if (suspended) {
         logger.info(
