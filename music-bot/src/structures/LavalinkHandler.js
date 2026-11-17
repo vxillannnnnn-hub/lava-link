@@ -432,31 +432,31 @@ function initLavalink(client) {
       player.set(`fallback_${track.info?.identifier}`, true);
       const cleanTitle = cleanTrackTitle(track.info.title);
       const author = track.info.author || "";
-      logger.info(`[AudioFallback] YouTube stream blocked. Resolving official mirror on SoundCloud: "${cleanTitle} ${author}"`);
+      logger.info(`[AudioFallback] YouTube stream blocked. Resolving official mirror on JioSaavn: "${cleanTitle} ${author}"`);
 
       try {
-        let fallbackRes = await player.search({ query: `scsearch:${cleanTitle} ${author}`.trim() }, client.user);
+        let fallbackRes = await player.search({ query: `jssearch:${cleanTitle} ${author}`.trim() }, client.user);
         if (!fallbackRes?.tracks?.length) {
-          logger.info(`[AudioFallback] Retrying SoundCloud with title only: "scsearch:${cleanTitle}"`);
-          fallbackRes = await player.search({ query: `scsearch:${cleanTitle}` }, client.user);
+          logger.info(`[AudioFallback] Retrying JioSaavn with title only: "jssearch:${cleanTitle}"`);
+          fallbackRes = await player.search({ query: `jssearch:${cleanTitle}` }, client.user);
         }
         if (!fallbackRes?.tracks?.length) {
           logger.info(`[AudioFallback] Retrying with Spotify mirror: "spsearch:${cleanTitle} ${author}"`);
           fallbackRes = await player.search({ query: `spsearch:${cleanTitle} ${author}`.trim() }, client.user);
         }
         if (!fallbackRes?.tracks?.length) {
-          logger.info(`[AudioFallback] Retrying with JioSaavn mirror: "jssearch:${cleanTitle} ${author}"`);
-          fallbackRes = await player.search({ query: `jssearch:${cleanTitle} ${author}`.trim() }, client.user);
+          logger.info(`[AudioFallback] Retrying with SoundCloud mirror: "scsearch:${cleanTitle}"`);
+          fallbackRes = await player.search({ query: `scsearch:${cleanTitle}` }, client.user);
         }
 
         if (fallbackRes?.tracks?.length > 0) {
           const mirrorTrack = fallbackRes.tracks[0];
-          logger.success(`[AudioFallback] Found mirror on ${mirrorTrack.info.sourceName || "SoundCloud"}: "${mirrorTrack.info.title}" (${mirrorTrack.info.uri}). Playing mirror...`);
+          logger.success(`[AudioFallback] Found mirror on ${mirrorTrack.info.sourceName || "JioSaavn"}: "${mirrorTrack.info.title}" (${mirrorTrack.info.uri}). Playing mirror...`);
           if (player.textChannelId) {
             const channel = client.channels.cache.get(player.textChannelId);
             if (channel) {
               channel.send({
-                content: `${emojis.sparkles} Switched to **mirror stream** (${mirrorTrack.info.sourceName || "SoundCloud"}) for **${truncate(track.info.title, 45)}** (direct YouTube stream was blocked).`,
+                content: `${emojis.sparkles} Switched to **mirror stream** (${mirrorTrack.info.sourceName || "JioSaavn"}) for **${truncate(track.info.title, 45)}** (direct YouTube stream was blocked on datacenter IP).`,
                 allowedMentions: { parse: [], users: [] },
               }).then((m) => setTimeout(() => m.delete().catch(() => {}), 10000)).catch(() => {});
             }

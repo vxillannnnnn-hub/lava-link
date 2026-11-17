@@ -31,7 +31,6 @@ const DEFAULT_METADATA_ONLY_SOURCES = [
   "deezer",
   "applemusic",
   "tidal",
-  "jiosaavn",
   "yandexmusic",
   "flowery-tts",
 ];
@@ -238,8 +237,10 @@ function isMetadataOnlyPlatform(value) {
  */
 function resolvePlaybackPlatform(configured = config.player?.defaultSearchPlatform) {
   const value = String(configured || "").toLowerCase().trim();
-  if (!value) return "ytmsearch";
-  return value;
+  if (!value) return "spsearch";
+  if (!isMetadataOnlyPlatform(value)) return value;
+  if (quality.allowMetadataOnlySource === true || value === "spsearch" || value === "jssearch") return value;
+  return "spsearch";
 }
 
 /**
@@ -322,10 +323,12 @@ async function resolveOpusMatch(player, reference, requester) {
   if (!title) return null;
 
   const queries = [
+    `jssearch:${title} ${author}`.trim(),
+    `jssearch:${title}`.trim(),
+    `spsearch:${title} ${author}`.trim(),
+    `scsearch:${title} ${author}`.trim(),
     `ytmsearch:${title} ${author}`.trim(),
     `ytsearch:${title} ${author}`.trim(),
-    `scsearch:${title} ${author}`.trim(),
-    `jssearch:${title} ${author}`.trim(),
   ];
 
   for (const query of queries) {

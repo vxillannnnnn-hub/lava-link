@@ -167,11 +167,11 @@ plugins:
             flowerytts: false
             youtube: false
         providers:
+            - "jssearch:%QUERY%"
+            - "scsearch:%QUERY%"
             - "ytmsearch:\"%ISRC%\""
             - "ytmsearch:%QUERY%"
             - "ytsearch:%QUERY%"
-            - "scsearch:%QUERY%"
-            - "jssearch:%QUERY%"
         lyrics-sources:
             spotify: true
             youtube: true
@@ -200,11 +200,11 @@ plugins:
             youtube: false
             flowerytts: false
         providers:
+            - "jssearch:{query}"
+            - "scsearch:{query}"
             - "ytmsearch:\"{isrc}\""
             - "ytmsearch:{query}"
             - "ytsearch:{query}"
-            - "scsearch:{query}"
-            - "jssearch:{query}"
         spotify:
             countryCode: "IN"
             playlistLoadLimit: 50

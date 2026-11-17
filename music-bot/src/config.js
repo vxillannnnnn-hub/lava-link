@@ -34,8 +34,8 @@ module.exports = {
     defaultAutoplay: process.env.DEFAULT_AUTOPLAY === "true" || false, // Starts off by default, turns on with button or command
     applyVolumeAsFilter: false, // NEVER decode to PCM if volume is 100
     autoMaximizeBitrate: process.env.AUTO_MAXIMIZE_BITRATE !== "false", // Automatically maximizes voice channel to 384kbps if permitted
-    // Default to YouTube Music search (ytmsearch) for official original recordings & bit-exact Opus
-    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "ytmsearch", // ytmsearch, ytsearch, scsearch, spsearch, jssearch
+    // Default to Spotify search (spsearch) resolved via SolaceAudio/JioSaavn for datacenter-unblocked studio audio
+    defaultSearchPlatform: process.env.DEFAULT_SEARCH_PLATFORM || "spsearch", // spsearch, jssearch, ytmsearch, ytsearch, scsearch
     maxPreviousTracks: 25,
     // Hard cap on upcoming tracks per guild (abuse/memory guard).
     maxQueueSize: parseInt(process.env.MAX_QUEUE_SIZE || "500", 10),

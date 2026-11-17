@@ -514,7 +514,10 @@ class AutoplayManager {
 
     const results = await Promise.allSettled(
       picks.map(async (entry) => {
-        const tracks = await this.searchWithTimeout(player, `scsearch:${entry.name} ${entry.artist}`.trim());
+        let tracks = await this.searchWithTimeout(player, `jssearch:${entry.name} ${entry.artist}`.trim());
+        if (!tracks?.length) {
+          tracks = await this.searchWithTimeout(player, `spsearch:${entry.name} ${entry.artist}`.trim());
+        }
         const seedArtist = normalizeArtist(entry.artist);
         return (
           tracks.find((track) => normalizeArtist(track?.info?.author) === seedArtist) ||
@@ -606,8 +609,8 @@ class AutoplayManager {
     if (raw.length < size && title) {
       const queries =
         mode === "artist"
-          ? [`scsearch:${author} mix`.trim(), `scsearch:${author} songs`.trim()]
-          : [`scsearch:${title} ${author}`.trim(), `scsearch:${author} radio`.trim()];
+          ? [`jssearch:${author}`.trim(), `spsearch:${author}`.trim()]
+          : [`jssearch:${title} ${author}`.trim(), `spsearch:${title} ${author}`.trim(), `jssearch:${author}`.trim()];
 
       const results = await Promise.allSettled(queries.map((q) => this.searchWithTimeout(player, q)));
       for (const result of results) {

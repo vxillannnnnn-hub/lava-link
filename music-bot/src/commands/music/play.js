@@ -115,9 +115,9 @@ module.exports = {
 
       let resolved = await player.search({ query: formattedQuery }, interaction.user).catch(() => null);
 
-      // Cascading multi-engine fallback (YouTube Music -> YouTube -> SoundCloud -> Spotify -> JioSaavn)
+      // Cascading multi-engine fallback (Spotify -> JioSaavn -> YouTube Music -> YouTube -> SoundCloud)
       if ((!resolved || !resolved.tracks || resolved.tracks.length === 0) && !isUrl) {
-        const fallbacks = ["ytmsearch", "ytsearch", "scsearch", "spsearch", "jssearch"];
+        const fallbacks = ["spsearch", "jssearch", "ytmsearch", "ytsearch", "scsearch"];
         for (const engine of fallbacks) {
           const candidateQuery = `${engine}:${query}`;
           if (candidateQuery.toLowerCase() === formattedQuery.toLowerCase()) continue;

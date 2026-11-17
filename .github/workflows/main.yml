@@ -477,7 +477,8 @@ jobs:
           LAVALINK_PASSWORD: ${{ secrets.LAVALINK_PASSWORD || 'youshallnotpass' }}
           LAVALINK_REQUEST_TIMEOUT_MS: "25000"
           AUTO_MAXIMIZE_BITRATE: "true"
-          DEFAULT_SEARCH_PLATFORM: "ytmsearch"
+          DEFAULT_SEARCH_PLATFORM: "spsearch"
+          ALLOW_METADATA_SOURCE: "true"
           STOP_ALONE_IN_247: "false"
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || '' }}
           RUNNER_LIFETIME_MS: "19800000"
