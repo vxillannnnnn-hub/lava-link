@@ -237,7 +237,7 @@ function isMetadataOnlyPlatform(value) {
  */
 function resolvePlaybackPlatform(configured = config.player?.defaultSearchPlatform) {
   const value = String(configured || "").toLowerCase().trim();
-  if (!value) return "spsearch";
+  if (!value) return "ytmsearch";
   if (!isMetadataOnlyPlatform(value)) return value;
   if (quality.allowMetadataOnlySource === true || value === "spsearch" || value === "jssearch") return value;
   return "spsearch";
